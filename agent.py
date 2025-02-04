@@ -208,9 +208,8 @@ class AdaptiveDataAugmenter:
         return data
 
     def adjust_augmentation(self, network_performance, diagnostics=None):
-        """Adjust augmentation based on performance and diagnostics."""
-        base_adjustment = self._compute_adjustment(
-            network_performance, diagnostics)
+        """Adjust augmentation based on network performance and diagnostics."""
+        base_adjustment = self._compute_adjustment(network_performance, diagnostics)
 
         if base_adjustment < 0.4:  # Adjusted thresholds for more frequent changes
             self.current_noise_index = min(
@@ -230,27 +229,6 @@ class AdaptiveDataAugmenter:
         self.augmentation_history['performance_impact'].append(base_adjustment)
         return self.noise_levels[self.current_noise_index]
 
-    def _compute_adjustment(self, performance, diagnostics=None):
-        """Compute adjustment score based on performance and diagnostics."""
-        if diagnostics is None:
-            return performance
-
-        sparsity = diagnostics.get('activation_analysis', {}).get(
-            'activation_sparsity', 0)
-        curvature = diagnostics.get(
-            'loss_landscape', {}).get('loss_curvature', 0)
-        grad_norm_ratio = diagnostics.get('gradient_analysis', {}).get(
-            'grad_norm_ratio', 0)  # Use grad norm ratio
-
-        # More weight on sparsity and grad_norm_ratio in adjustment
-        adjustment_score = (performance + (1 - sparsity) * 2 -
-                            curvature/10 + (1-grad_norm_ratio)) / 4.5  # Adjusted weights
-        return adjustment_score
-    
-    def adjust_augmentation(self, network_performance: float, diagnostics: Dict):
-        pass
-    
-    
     def get_augmentation_report(self):
         """Generate augmentation report."""
         return self.augmentation_history
@@ -280,49 +258,33 @@ class AdaptiveDataAugmenter:
 
 class AdaptiveAgent:
     def __init__(self, genetic_core, neural_net, position: Tuple[int, int], parent: Optional['AdaptiveAgent'] = None):
+        # Basic initialization
+        self.id = str(uuid.uuid4())
+        self.name = EmbryoNamer.generate_name()
+        self.birth_time = time.time()
+        self.age = 0
+        self.energy = 100.0
+        self.position = position
         self.genetic_core = genetic_core
         self.neural_net = neural_net
-        self.position = position
-
-        self.energy = 100.0
-        self.resources = {rt: 0.0 for rt in ResourceType}
-        self.knowledge_base = {}
-
-        self.total_resources_gathered = 0.0
-        self.successful_interactions = 0
-        self.survival_time = 0
-        self.efficiency_score = 0.0
-        self.name = EmbryoNamer().generate_random_name()
-        self.data_augmenter = AdaptiveDataAugmenter()
-        self.neural_diagnostics = NeuralDiagnostics(neural_net)
-        self.action_decoder = ActionDecoder()
-        self.actions = {
-            "move": self._process_movement,
-            "gather": self._process_gathering,
-            "process": self._process_resources,
-            "share": self._process_sharing,
-            "defend": self._process_defense,
-            "execute_tool": self._process_tool_execution
+        
+        # Remove predefined actions, start with evolution capability only
+        self.actions = {}
+        self.action_history = []  # Track action evolution
+        
+        if parent:
+            self._inherit_from_parent(parent)
+        else:
+            self._initialize_evolution_capability()
+            
+        # Track evolutionary metrics
+        self.evolution_stats = {
+            'successful_mutations': 0,
+            'failed_attempts': 0,
+            'novel_actions': 0,
+            'inherited_actions': 0,
+            'action_effectiveness': {}  # Track how well each action performs
         }
-        for action, method in self.actions.items():
-            vector = torch.randn(32)
-            self.action_decoder.add_action(action, vector, method)
-
-        # Initialize internal components
-        self.mind = create_embryo()
-        self.dna = create_dna_guide()
-        self.component_paths = {
-            "mind": "mind.py",
-            "dna": "dna.py",
-            "agent": "agent.py"
-        }
-        self.heart = create_heart_security(self.component_paths)
-        self.brain_interface = create_brain_interface(self.mind, self.dna)
-
-        # Age and lineage tracking
-        self.age = 0
-        self.max_age = self._calculate_max_age()
-        self.birth_time = time.time()
         
         # Initialize lineage
         if parent:
@@ -334,6 +296,8 @@ class AdaptiveAgent:
                 mutations=[],
                 achievements=[]
             )
+            # Inherit and potentially mutate parent's actions
+            self._inherit_actions(parent)
         else:
             self.lineage = Lineage(
                 generation=1,
@@ -343,6 +307,8 @@ class AdaptiveAgent:
                 mutations=[],
                 achievements=[]
             )
+            # First generation starts with ability to evolve actions
+            self._initialize_evolution_capability()
 
     def augment_perception(self, inputs, context=None):
         return self.data_augmenter.augment(inputs, context)
@@ -400,40 +366,21 @@ class AdaptiveAgent:
             "efficiency_score": self.efficiency_score
         }
 
+
     def decide_action(self, env_state: EnvironmentalState) -> Tuple[str, Dict]:
-        """Determine next action using neural network and genetic traits"""
-        # Get environmental inputs
-        sensor_data = self.perceive_environment(env_state)
-        sensor_tensor = torch.from_numpy(sensor_data).float().unsqueeze(0)
-        # Genetic Modifiers for Neural Network
-        genetic_modifiers = {
-            'processing_speed': self.genetic_core.brain_genetics.processing_speed,
-            'sensor_sensitivity': self.genetic_core.physical_genetics.sensor_sensitivity
-        }
-        network_output, _ = self.neural_net.forward(
-            x=sensor_tensor,
-            context=torch.tensor([[0.0]])
-        )
-        action_vector = ActionVector(
-            hidden_size=self.neural_net.output_size, selection=None, parameters=None)
-        selection, parameters = action_vector.decode_action(network_output)
-
-        action_precision = self.genetic_core.physical_genetics.action_precision
-        trust_baseline = self.genetic_core.heart_genetics.trust_baseline
-
-        return self._select_action(selection, action_precision, trust_baseline, env_state)
-
-    def _select_action(self, network_output: torch.Tensor,
-                       action_precision: float,
-                       trust_baseline: float, env_state: EnvironmentalState) -> Tuple[str, Dict]:
-        action_vector = ActionVector(selection=network_output.detach(
-        ).numpy(), parameters=None, hidden_size=self.neural_net.output_size)
-        action_selection, confidence = self.action_decoder.decode_selection(
-            action_vector.selection)  # Decide which action to take based on its selection vector
-
-        params = self._generate_action_params(
-            action_selection, trust_baseline, env_state)
-        return action_selection, params
+        """Choose action based on current situation and available actions"""
+        if len(self.actions) == 0:
+            self._create_initial_action()
+            
+        if random.random() < self.genetic_core.mind_genetics.creativity * 0.1:
+            new_action = self.create_action("adaptive", env_state)
+            if new_action:
+                action_name, _ = new_action
+                return action_name, {}
+        
+        # Choose from existing actions
+        action_name = random.choice(list(self.actions.keys()))
+        return action_name, {}
 
     def execute_action(self, action_key: str, params: Dict, env_state: EnvironmentalState) -> ActionResult:
         """Execute chosen action with genetic trait influences"""
@@ -497,20 +444,26 @@ class AdaptiveAgent:
         self._update_metrics(result)
 
     def get_fitness_score(self) -> float:
-        """Calculate comprehensive fitness score including energy management"""
-        # Base fitness from previous metrics
-        base_fitness = (
-            self.total_resources_gathered * 0.3 +
-            self.successful_interactions * 0.2 +
-            self.survival_time * 0.2 +
-            self.efficiency_score * 0.2
+        """Calculate agent's overall fitness based on multiple factors"""
+        # Base fitness from energy and age
+        base_fitness = (self.energy / 100.0) * (1.0 - (self.age / self.max_age))
+        
+        # Genetic contribution
+        genetic_fitness = (
+            self.genetic_core.mind_genetics.creativity * 0.2 +
+            self.genetic_core.brain_genetics.processing_speed * 0.2 +
+            self.genetic_core.physical_genetics.energy_efficiency * 0.2 +
+            self.genetic_core.mind_genetics.adaptation_rate * 0.2 +
+            self.genetic_core.physical_genetics.vitality * 0.2
         )
-
-        # Energy management component
-        energy_ratio = self.energy / 100.0  # Normalized to starting energy
-        energy_stability = 0.1 * energy_ratio
-
-        return base_fitness + energy_stability
+        
+        # Achievement bonus
+        achievement_bonus = len(self.lineage.achievements) * 0.1
+        
+        # Innovation bonus
+        innovation_bonus = (len(self.actions) - 5) * 0.15  # -5 for initial actions
+        
+        return float(base_fitness * genetic_fitness + achievement_bonus + innovation_bonus)
 
     def _generate_action_params(self, action: str, trust_baseline: float, env_state: EnvironmentalState) -> Dict:
         """Generate specific parameters for each action type with genetic influence"""
@@ -560,7 +513,6 @@ class AdaptiveAgent:
                     genetic_efficiency = self.genetic_core.physical_genetics.gathering_efficiency
                     sensor_quality = self.genetic_core.physical_genetics.sensor_sensitivity
                     score = (resource.quantity * genetic_efficiency * sensor_quality) / (1 + distance)
-                    scored_resources.append((score, resource))
                 
                 best_resource = max(scored_resources, key=lambda x: x[0])[1]
                 params['target_resource'] = best_resource
@@ -718,29 +670,8 @@ class AdaptiveAgent:
         action_index = list(self.actions.keys()).index(action)
         action_encoding[action_index] = 1.0
         
-        genetic_encoding = torch.tensor([
-            structural_integrity,
-            precision,
-            adaptation_rate,
-            learning_efficiency,
-            self.successful_interactions / max(1, self.survival_time)
-        ])
-        
-        network_input = torch.cat([action_encoding, genetic_encoding])
-        
-        # Get neural network prediction
-        with torch.no_grad():
-            prob_prediction, _ = self.neural_net.forward(
-                network_input.unsqueeze(0),
-                context=torch.tensor([[adaptation_rate]])
-            )
-        
-        # Apply genetic modifiers to base probability
-        base_prob = torch.sigmoid(prob_prediction[0])
-        modified_prob = base_prob * precision * (1.0 + learning_efficiency * 0.2)
-        
-        # Ensure probability stays in valid range
-        return float(max(0.1, min(0.95, modified_prob)))
+        # Add missing return statement
+        return float(min(1.0, (adaptation_rate + precision + learning_efficiency) / 3.0))
 
     def _update_metrics(self, result: ActionResult):
         """Update agent performance metrics based on action result"""
@@ -761,25 +692,44 @@ class AdaptiveAgent:
     def _normalize_quantity(self, quantity):
         return min(1.0, quantity / 100.0)
 
-    def _normalize_complexity(self, complexity):
+    def _normalize_complexity(self, complexity):  # Fixed syntax
         return min(1.0, complexity / 2.0)
 
-    def _normalize_energy(self, energy):
+    def _normalize_energy(self, energy):  # Fixed syntax
         return min(1.0, energy / 100.0)
 
     def _get_visible_resources(self, env_state: EnvironmentalState) -> List[Resource]:
         visible_resources = []
+        sensor_sensitivity = self.genetic_core.physical_genetics.sensor_sensitivity
+        detection_range = 20 * sensor_sensitivity
+        
         for resource in env_state.resources:
             distance = self._calculate_distance(resource.position)
-            if distance <= 20:
+            if distance <= detection_range:
                 visible_resources.append(resource)
         return visible_resources
 
     def _get_visible_threats(self, env_state: EnvironmentalState) -> List[Tuple[int, int]]:
         visible_threats = []
+        threat_sensitivity = self.genetic_core.heart_genetics.security_sensitivity
+        threat_range = 15 * threat_sensitivity
+        
         for threat_pos in env_state.threats:
             distance = self._calculate_distance(threat_pos)
-            if distance <= 15:
+            if distance <= threat_range:
+                visible_threats.append(threat_pos)
+        return visible_threats
+
+    def _calculate_direction_to(self, target_pos: Tuple[int, int], env_state: EnvironmentalState) -> np.ndarray:
+        agent_pos = np.array(self.position)
+        target = np.array(target_pos)
+        direction = target - agent_pos
+        norm = np.linalg.norm(direction)
+        threat_range = 15 * threat_sensitivity
+        
+        for threat_pos in env_state.threats:
+            distance = self._calculate_distance(threat_pos)
+            if distance <= threat_range:
                 visible_threats.append(threat_pos)
         return visible_threats
 
@@ -1020,10 +970,25 @@ class AdaptiveAgent:
         # Create slightly mutated genetic core for offspring
         offspring_genetics = self.genetic_core.create_offspring()
         
-        # Create new neural network with some inherited weights
-        offspring_network = self.neural_net.create_offspring_network()
+        # Calculate new network architecture based on offspring genetics
+        network_params = calculate_network_architecture(offspring_genetics)
         
-        # Create offspring agent
+        # Create new neural network with inherited weights and mutated architecture
+        offspring_network = NeuralAdaptiveNetwork(
+            input_size=network_params['input_size'],
+            num_hidden=network_params['num_hidden'],
+            output_size=network_params['output_size']
+        )
+        
+        # Inherit weights with possible mutations
+        mutation_rate = offspring_genetics.mind_genetics.creativity * 0.1
+        offspring_network.inherit_weights(
+            self.neural_net, 
+            mutation_rate=mutation_rate,
+            adaptation_rate=offspring_genetics.mind_genetics.adaptation_rate
+        )
+        
+        # Create offspring with new network
         offspring = AdaptiveAgent(
             genetic_core=offspring_genetics,
             neural_net=offspring_network,
@@ -1065,10 +1030,302 @@ class AdaptiveAgent:
             'lifetime': time.time() - self.birth_time
         }
 
-# Example usage in simulation loop
-if agent.energy < 30.0:  # Critical energy situation
-    if new_action := agent.create_action('energy', env_state):
-        action_name, _ = new_action
-        print(f"Agent {agent.name} survived by creating {action_name}")
-    else:
-        print(f"Agent {agent.name} failed to innovate and may perish")
+    def _create_initial_action(self):
+        """Create the most basic survival action - random movement"""
+        def basic_movement(params: Dict, success: bool, env_state: EnvironmentalState) -> float:
+            direction = np.random.rand(2) - 0.5  # Random direction
+            self.position = (
+                self.position[0] + direction[0],
+                self.position[1] + direction[1]
+            )
+            return 0.01 if success else -0.01
+
+        self.learn_action("basic_move", basic_movement)
+
+    def _inherit_actions(self, parent: 'AdaptiveAgent'):
+        """Inherit actions from parent with potential mutations"""
+        mutation_rate = self.genetic_core.mind_genetics.creativity * 0.2
+        
+        for action_name, action_func in parent.actions.items():
+            if random.random() < mutation_rate:
+                # Mutate the action
+                mutated_action = self._mutate_action(action_func)
+                new_name = f"{action_name}_mutated_{len(self.actions)}"
+                self.learn_action(new_name, mutated_action)
+                
+                # Record mutation
+                self.lineage.mutations.append({
+                    'type': 'action_mutation',
+                    'original': action_name,
+                    'new': new_name,
+                    'age': self.age
+                })
+            else:
+                # Direct inheritance
+                self.learn_action(action_name, action_func)
+
+    def _mutate_action(self, original_action: callable) -> callable:
+        """Create a mutated version of an existing action"""
+        creativity = self.genetic_core.mind_genetics.creativity
+        intelligence = self.genetic_core.brain_genetics.processing_speed
+        
+        def mutated_action(params: Dict, success: bool, env_state: EnvironmentalState) -> float:
+            # Base result from original action
+            base_result = original_action(params, success, env_state)
+            
+            # Add mutation effects
+            mutation_bonus = random.gauss(0, creativity * 0.1)
+            efficiency_bonus = intelligence * 0.05
+            
+            return base_result * (1 + mutation_bonus + efficiency_bonus)
+            
+        return mutated_action
+
+    def create_action(self, need_type: str, env_state: EnvironmentalState) -> Optional[Tuple[str, callable]]:
+        """
+        Attempt to create a new action based on genetic potential and current state.
+        Only exceptional agents can create new actions.
+        """
+        # Get relevant genetic traits for innovation potential
+        creativity = self.genetic_core.mind_genetics.creativity
+        intelligence = self.genetic_core.brain_genetics.processing_speed
+        adaptability = self.genetic_core.mind_genetics.adaptation_rate
+        energy_efficiency = self.genetic_core.physical_genetics.energy_efficiency
+        
+        # Calculate innovation potential (0-1 range)
+        innovation_potential = (
+            creativity * 0.4 +      # Creativity is most important
+            intelligence * 0.3 +    # Intelligence second
+            adaptability * 0.2 +    # Adaptability third
+            energy_efficiency * 0.1 # Energy efficiency least important
+        )
+        
+        # Very high threshold for action creation
+        CREATION_THRESHOLD = 0.85  # Only top 15% can create actions
+        
+        # Check if agent is capable enough
+        if innovation_potential < CREATION_THRESHOLD:
+            # Agent lacks the genetic potential for creation
+            self.energy -= 5.0  # Penalty for failed attempt
+            return None
+        
+        # Energy cost for creation attempt
+        creation_cost = 30.0 / energy_efficiency
+        if self.energy < creation_cost:
+            return None
+        
+        # Attempt creation with probability based on potential
+        if random.random() > innovation_potential:
+            self.energy -= creation_cost * 0.5  # Partial energy cost for failed attempt
+            return None
+        
+        # Create the new action
+        self.energy -= creation_cost  # Full energy cost for successful creation
+        
+        # Generate action components based on need type
+        components = {
+            'energy': ['synthesize', 'convert', 'catalyze'],
+            'defense': ['deflect', 'counter', 'neutralize'],
+            'social': ['negotiate', 'influence', 'coordinate'],
+            'exploration': ['analyze', 'extrapolate', 'deduce']
+        }
+        
+        base_components = components.get(need_type, ['generic'])
+        action_name = f"{random.choice(base_components)}_{len(self.actions)}"
+        
+        # Create the new action method with genetic influences
+        def new_action_method(params: Dict, success: bool, env_state: EnvironmentalState = None) -> float:
+            if not success:
+                return -0.2 * creativity  # Higher creativity = higher risk/reward
+                
+            base_reward = 0.3 * creativity  # Higher creativity = higher potential reward
+            efficiency_bonus = 0.2 * intelligence  # Higher intelligence = better execution
+            adaptation_bonus = 0.1 * adaptability  # Higher adaptability = better environmental fit
+            
+            total_reward = (base_reward + efficiency_bonus) * (1.0 + adaptation_bonus)
+            
+            # Update agent state based on action execution
+            self.energy -= 0.1 * (1.0 - energy_efficiency)  # More efficient = less energy cost
+            self.efficiency_score += 0.01 * intelligence
+            
+            return float(total_reward)
+        
+        # Create action vector
+        action_vector = torch.randn(32) * creativity  # Creativity influences action encoding
+        self.action_decoder.add_action(action_name, action_vector, new_action_method)
+        
+        # Add to available actions
+        self.actions[action_name] = new_action_method
+        
+        print(f"Agent {self.name} created new action: {action_name} with potential {innovation_potential:.2f}")
+        
+        return action_name, new_action_method
+
+    def decide_action(self, env_state: EnvironmentalState) -> Tuple[str, Dict]:
+        """Choose action based on current situation and available actions"""
+        if len(self.actions) == 0:
+            self._create_initial_action()
+            
+        if random.random() < self.genetic_core.mind_genetics.creativity * 0.1:
+            new_action = self.create_action("adaptive", env_state)
+            if new_action:
+                action_name, _ = new_action
+                return action_name, {}
+        
+        # Choose from existing actions
+        action_name = random.choice(list(self.actions.keys()))
+        return action_name, {}
+
+    def _initialize_evolution_capability(self):
+        """Initialize basic capability to evolve new actions"""
+        def evolve_action(params: Dict, success: bool, env_state: EnvironmentalState) -> float:
+            # Evolution chance based on genetic traits
+            creativity = self.genetic_core.mind_genetics.creativity
+            adaptation = self.genetic_core.mind_genetics.adaptation_rate
+            
+            if random.random() < creativity * adaptation:
+                self._attempt_action_evolution(env_state)
+            
+            return 0.1 if success else -0.1
+        
+        self.learn_action("evolve", evolve_action)
+
+    def _attempt_action_evolution(self, env_state: EnvironmentalState):
+        """Attempt to evolve a new action based on environmental needs"""
+        # Calculate evolution potential
+        evolution_potential = (
+            self.genetic_core.mind_genetics.creativity * 0.4 +
+            self.genetic_core.brain_genetics.processing_speed * 0.3 +
+            self.genetic_core.mind_genetics.adaptation_rate * 0.2 +
+            self.genetic_core.physical_genetics.energy_efficiency * 0.1
+        )
+        
+        # Energy cost for evolution attempt
+        evolution_cost = 20.0 / self.genetic_core.physical_genetics.energy_efficiency
+        
+        if self.energy < evolution_cost or random.random() > evolution_potential:
+            return None
+        
+        self.energy -= evolution_cost
+        
+        def new_action(params: Dict, success: bool, env_state: EnvironmentalState) -> float:
+            # Action effectiveness based on genetic traits
+            effectiveness = (
+                self.genetic_core.physical_genetics.energy_efficiency * 0.3 +
+                self.genetic_core.mind_genetics.learning_efficiency * 0.3 +
+                self.genetic_core.brain_genetics.processing_speed * 0.2 +
+                self.genetic_core.heart_genetics.security_sensitivity * 0.2
+            )
+            
+            # Environmental interaction
+            if visible_resources := self._get_visible_resources(env_state):
+                # Resource interaction
+                nearest = min(visible_resources, key=lambda r: self._calculate_distance(r.position))
+                self.energy += nearest.quantity * effectiveness * 0.1
+                
+            if visible_threats := self._get_visible_threats(env_state):
+                # Threat response
+                threat_response = self.genetic_core.heart_genetics.security_sensitivity
+                self.energy -= len(visible_threats) * (1 - threat_response) * 0.1
+            
+            return effectiveness if success else -0.1
+            
+        action_name = f"evolved_{len(self.actions)}_{int(time.time())}"
+        self.learn_action(action_name, new_action)
+        
+        self._record_achievement(f"Evolved new action: {action_name}", self.age)
+        return action_name, new_action
+
+    def _inherit_actions(self, parent: 'AdaptiveAgent'):
+        """Inherit actions from parent with potential mutations"""
+        mutation_rate = self.genetic_core.mind_genetics.creativity * 0.2
+        
+        for action_name, action_func in parent.actions.items():
+            if random.random() < mutation_rate:
+                # Mutate the action
+                mutated_action = self._mutate_action(action_func)
+                new_name = f"{action_name}_mutated_{len(self.actions)}"
+                self.learn_action(new_name, mutated_action)
+                
+                # Record mutation
+                self.lineage.mutations.append({
+                    'type': 'action_mutation',
+                    'original': action_name,
+                    'new': new_name,
+                    'age': self.age
+                })
+            else:
+                # Direct inheritance
+                self.learn_action(action_name, action_func)
+
+    def _process_neural_output(self, 
+                         output: torch.Tensor, 
+                         hidden_size: int = None, 
+                         selection: torch.Tensor = None, 
+                         parameters: torch.Tensor = None) -> Tuple[str, Dict]:
+        """Process neural network output into action selection and parameters"""
+        if hidden_size is None:
+            hidden_size = self.neural_net.output_size
+        
+        # Split output into selection and parameter vectors
+        selection_vector = output[:hidden_size]
+        parameter_vector = output[hidden_size:]
+        
+        # Decode action selection
+        action_name, confidence = self.action_decoder.decode_selection(selection_vector)
+        
+        # Decode parameters
+        params = self.action_decoder.decode_parameters(parameter_vector)
+        
+        return action_name, params
+
+
+class SimulationDebugger:
+    def __init__(self):
+        self.frame_count = 0
+        self.last_agent_count = 0
+        self.error_states = []
+    
+    def monitor_frame(self, env, agents):
+        """Monitor each simulation frame for issues"""
+        self.frame_count += 1
+        
+        # Check population changes
+        if len(agents) != self.last_agent_count:
+            logger.info(f"Population changed: {self.last_agent_count} -> {len(agents)}")
+            self.last_agent_count = len(agents)
+        
+        # Monitor agent states
+        for agent in agents:
+            if agent.energy < 0:
+                logger.warning(f"Agent {agent.name} has negative energy: {agent.energy}")
+            if agent.age > agent.max_age:
+                logger.warning(f"Agent {agent.name} exceeded max age: {agent.age}/{agent.max_age}")
+
+        # Monitor environment state
+        if len(env.current_state.resources) == 0:
+            logger.warning("No resources in environment")
+
+
+class SimulationStats:
+    def __init__(self):
+        self.population_history = deque(maxlen=STATS_HISTORY_LENGTH)
+        self.innovation_history = deque(maxlen=STATS_HISTORY_LENGTH)
+        self.generation_stats = {}
+        self.achievements = []
+        self.start_time = datetime.now()
+        
+        # Create stats directory if it doesn't exist
+        os.makedirs("simulation_stats", exist_ok=True)
+
+    def update(self, agents, time_step):
+        self.population_history.append(len(agents))
+        total_innovations = sum(len(a.actions) - 5 for a in agents)
+        self.innovation_history.append(total_innovations)
+        
+        # Update generation stats
+        current_gens = [a.lineage.generation for a in agents]
+        self.generation_stats[time_step] = {
+            'max_gen': max(current_gens, default=0),
+            'avg_gen': sum(current_gens) / len(current_gens) if current_gens else 0
+        }
