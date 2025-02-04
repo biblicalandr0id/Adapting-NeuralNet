@@ -1,10 +1,13 @@
 # mind.py
 import random
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 import numpy as np
 from dataclasses import dataclass, field
 import time
 import torch
+import logging
+from .neural_networks import NeuralAdaptiveNetwork
+from .genetics import GeneticCore
 
 
 @dataclass
@@ -23,6 +26,29 @@ class Memory:
     short_term: List[Dict[str, Any]] = field(default_factory=list)
     long_term: Dict[str, Any] = field(default_factory=dict)
     developmental_milestones: List[str] = field(default_factory=list)
+
+
+@dataclass
+class MindMetrics:
+    age: float = 0.0
+    growth_stage: str = "embryonic"
+    cognitive_complexity: float = 0.1
+    adaptation_rate: float = 0.1
+    learning_capacity: float = 0.1
+
+
+@dataclass
+class MindState:
+    """Current state of mind processing"""
+    consciousness_level: float = 1.0
+    awareness_focus: str = "environment"
+    emotional_state: Dict[str, float] = field(default_factory=lambda: {
+        'curiosity': 0.5,
+        'confidence': 0.5,
+        'stress': 0.0
+    })
+    current_task: Optional[str] = None
+    energy_consumption: float = 0.0
 
 
 class AgentEmbryo:
@@ -136,6 +162,67 @@ class AgentEmbryo:
         }
 
 
+class EmbronicMind:
+    def __init__(self):
+        self.metrics = MindMetrics()
+        self.state = MindState(metrics=self.metrics)
+        
+    def process_stimulus(self, stimulus: Dict[str, Any]) -> Tuple[Dict[str, Any], MindState]:
+        """Process incoming stimulus and return response with updated state"""
+        try:
+            # Update metrics based on stimulus
+            self.metrics.age += 0.1
+            self.metrics.cognitive_complexity += 0.01
+            
+            # Generate response
+            response = {
+                "complexity": self.metrics.cognitive_complexity,
+                "adaptation": self.metrics.adaptation_rate,
+                "learning": self.metrics.learning_capacity,
+                "focus": stimulus.get("type", "unknown")
+            }
+            
+            return response, self.state
+            
+        except Exception as e:
+            logging.error(f"Error processing stimulus: {e}")
+            return {}, self.state
+
+
+class Mind:
+    def __init__(self, genetic_core: GeneticCore, neural_net: NeuralAdaptiveNetwork):
+        self.genetic_core = genetic_core
+        self.neural_net = neural_net
+        self.state = MindState()
+        self.memory = []
+        self.processing_queue = []
+        
+    def process_state(self, state_input: Dict) -> Dict:
+        """Process current state through mind systems"""
+        # Convert input to tensor
+        state_tensor = torch.tensor([float(v) for v in state_input.values()])
+        
+        # Process through neural network
+        output, importance = self.neural_net(state_tensor)
+        
+        # Update mind state
+        self.state.energy_consumption = importance.mean().item()
+        self.state.consciousness_level = max(0.1, min(1.0, 
+            self.state.consciousness_level - self.state.energy_consumption * 0.1
+        ))
+        
+        return {
+            'output': output.detach().numpy(),
+            'consciousness': self.state.consciousness_level,
+            'energy': self.state.energy_consumption
+        }
+
+
 def create_embryo() -> AgentEmbryo:
     """Factory function to create a new agent embryo"""
     return AgentEmbryo()
+
+
+def create_embryo() -> EmbronicMind:
+    """Factory function to create embryonic mind"""
+    return EmbronicMind()

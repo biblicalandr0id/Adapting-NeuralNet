@@ -9,6 +9,7 @@ import random
 import torch
 import logging
 import pyperclip  # For copy-paste functionality
+from .brain import Brain, BrainState
 
 class BrainCore:
     def __init__(self):
@@ -242,6 +243,27 @@ class BrainInterface(tk.Tk):
 def create_brain_interface(mind, dna_guide) -> BrainInterface:
     """Factory function to create brain interface"""
     return BrainInterface(mind, dna_guide)
+
+class BrainUI:
+    def __init__(self, brain: Brain):
+        self.brain = brain
+        self.root = tk.Tk()
+        self.root.title("Brain Interface")
+        
+        # Create visualization areas
+        self._setup_ui()
+        self._create_monitors()
+        
+    def update_display(self, brain_state: BrainState):
+        """Update UI with current brain state"""
+        self.state_display.delete('1.0', tk.END)
+        self.state_display.insert(tk.END, f"""
+        Attention: {brain_state.attention_focus}
+        Cognitive Load: {brain_state.cognitive_load:.2f}
+        Processing Depth: {brain_state.processing_depth:.2f}
+        Memory Usage: {brain_state.memory_utilization:.2f}
+        Current Task: {brain_state.current_task or 'None'}
+        """)
 
 # Example usage:
 if __name__ == "__main__":

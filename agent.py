@@ -257,16 +257,37 @@ class AdaptiveDataAugmenter:
 
 
 class AdaptiveAgent:
-    def __init__(self, genetic_core, neural_net, position: Tuple[int, int], parent: Optional['AdaptiveAgent'] = None):
-        # Basic initialization
+    def __init__(self, genetic_core: GeneticCore, neural_net: NeuralAdaptiveNetwork, 
+                 position: Tuple[float, float], gender: Optional[str] = None,
+                 birth_record: Optional[Dict] = None, parent_ids: Optional[Dict] = None):
+        """Initialize agent with gender and birth documentation"""
         self.id = str(uuid.uuid4())
+        self.birth_time = datetime.now()
+        self.gender = gender or random.choice(['male', 'female'])
+        self.birth_record = birth_record
+        self.parent_ids = parent_ids or {}
+        
+        # Store birth information
+        if not birth_record:
+            self.birth_record = {
+                'id': self.id,
+                'timestamp': self.birth_time,
+                'gender': self.gender,
+                'location': position,
+                'genetic_traits': genetic_core.get_all_traits(),
+                'generation': 1,
+                'parents': None
+            }
+            self._save_birth_record(self.birth_record)
+        
+        # Basic initialization
         self.name = EmbryoNamer.generate_name()
-        self.birth_time = time.time()
         self.age = 0
         self.energy = 100.0
         self.position = position
         self.genetic_core = genetic_core
         self.neural_net = neural_net
+        self.heart = HeartSystem(genetic_core)
         
         # Remove predefined actions, start with evolution capability only
         self.actions = {}
@@ -309,6 +330,8 @@ class AdaptiveAgent:
             )
             # First generation starts with ability to evolve actions
             self._initialize_evolution_capability()
+        self.is_predator = is_predator
+        self.hunting_stats = {} if is_predator else None
 
     def augment_perception(self, inputs, context=None):
         return self.data_augmenter.augment(inputs, context)
@@ -932,24 +955,105 @@ class AdaptiveAgent:
 
     def update(self, env_state: EnvironmentalState) -> bool:
         """Update agent state and return whether agent should survive"""
-        self.age += 1
+        if self.is_predator:
+            return self._update_predator(env_state)
+        return self._update_prey(env_state)
+    
+    def _update_predator(self, env_state: EnvironmentalState) -> bool:
+        """Update predator-specific behavior"""
+        # Scan for prey
+        visible_prey = self._get_visible_agents(env_state)
         
-        # Age-related energy drain
-        age_factor = self.age / self.max_age
-        energy_drain = 0.1 * (1 + age_factor)
-        self.energy -= energy_drain
+        # Hunt if prey detected
+        if visible_prey:
+            target = min(visible_prey, 
+                        key=lambda x: self._calculate_distance(x.position))
+            self._hunt_target(target, env_state)
+            
+        # Check reproduction
+        if self.can_reproduce():
+            self._attempt_reproduction(env_state)
+            
+        return self.energy > 0 and self.age < self.max_age
+    
+    def _hunt_target(self, target: 'AdaptiveAgent', env_state: EnvironmentalState) -> None:
+        """Execute hunting behavior"""
+        distance = self._calculate_distance(target.position)
         
-        # Check for natural death
-        if self.age >= self.max_age:
-            self._record_achievement("Died of natural causes", self.age)
-            return False
+        if distance < self.attack_strength:
+            # Attack success chance based on genetics
+            if random.random() < self.hunting_efficiency:
+                energy_gain = min(30.0, target.energy * 0.5)
+                self.energy += energy_gain
+                target.energy -= energy_gain * 2  # Extra penalty for being hunted
+                
+                if not hasattr(self.hunting_stats, 'successful_hunts'):
+                    self.hunting_stats['successful_hunts'] = 0
+                self.hunting_stats['successful_hunts'] += 1
+
+    def reproduce(self, env_state: EnvironmentalState) -> Optional['AdaptiveAgent']:
+        """Attempt to reproduce with compatible partner"""
+        # Check for valid partner in range
+        potential_partners = self._find_compatible_partners(env_state)
+        if not potential_partners:
+            return None
             
-        # Check for death by exhaustion
-        if self.energy <= 0:
-            self._record_achievement("Died from exhaustion", self.age)
-            return False
+        partner = self._select_partner(potential_partners)
+        if not partner:
+            return None
             
-        return True
+        # Determine genetic inheritance
+        mother = self if self.gender == 'female' else partner
+        father = partner if self.gender == 'female' else self
+        
+        # Create offspring genetics
+        offspring_genetics = self.genetic_core.create_offspring(
+            partner_genetics=partner.genetic_core,
+            mother_contribution=0.6,  # Maternal genes have slightly more influence
+            father_contribution=0.4
+        )
+        
+        # Generate birth documentation
+        birth_record = {
+            'id': str(uuid.uuid4()),
+            'timestamp': datetime.now(),
+            'parents': {
+                'mother_id': mother.id,
+                'father_id': father.id,
+                'mother_fitness': mother.calculate_fitness(),
+                'father_fitness': father.calculate_fitness()
+            },
+            'location': self.position,
+            'genetic_traits': offspring_genetics.get_all_traits(),
+            'generation': max(self.lineage.generation, partner.lineage.generation) + 1
+        }
+        
+        # Save birth record
+        self._save_birth_record(birth_record)
+        
+        # Create offspring with documented lineage
+        offspring = AdaptiveAgent(
+            genetic_core=offspring_genetics,
+            neural_net=self._create_offspring_network(offspring_genetics),
+            position=(
+                self.position[0] + random.uniform(-2, 2),
+                self.position[1] + random.uniform(-2, 2)
+            ),
+            gender=random.choice(['male', 'female']),
+            birth_record=birth_record,
+            parent_ids={'mother': mother.id, 'father': father.id}
+        )
+        
+        return offspring
+
+    def _save_birth_record(self, birth_record: Dict):
+        """Save birth record to dedicated file"""
+        record_dir = f'birth_records/{birth_record["timestamp"].strftime("%Y%m%d")}'
+        os.makedirs(record_dir, exist_ok=True)
+        
+        filename = f'{record_dir}/{birth_record["id"]}.json'
+        with open(filename, 'w') as f:
+            json.dump(birth_record, f, indent=2, default=str)
 
     def reproduce(self, env_state: EnvironmentalState) -> Optional['AdaptiveAgent']:
         """Attempt to reproduce and create offspring"""
@@ -1278,6 +1382,67 @@ class AdaptiveAgent:
         params = self.action_decoder.decode_parameters(parameter_vector)
         
         return action_name, params
+
+    def calculate_fitness(self) -> float:
+        """Calculate agent's fitness based on genetic traits and performance"""
+        return (
+            (self.energy / 100.0) * self.genetic_core.physical_genetics.energy_efficiency * 0.4 +
+            (1.0 - self.age / self.max_age) * self.genetic_core.physical_genetics.longevity * 0.3 +
+            (len(self.actions) / 10.0) * self.genetic_core.mind_genetics.creativity * 0.2 +
+            (self.evolution_stats.get('successful_mutations', 0) / 5.0) * 
+            self.genetic_core.mind_genetics.adaptation_rate * 0.1
+        )
+
+    def can_reproduce(self) -> bool:
+        """Determine if agent can reproduce based on fitness and genetic traits"""
+        reproduction_chance = self.genetic_core.physical_genetics.reproduction_rate * 0.01
+        fitness_threshold = 0.6 * (1 + self.genetic_core.mind_genetics.learning_efficiency)
+        
+        return (
+            random.random() < reproduction_chance and
+            self.calculate_fitness() > fitness_threshold and
+            self.energy > 50.0  # Minimum energy required
+        )
+
+    def _find_sharing_target(self, env_state: EnvironmentalState, empathy: float) -> Optional['AdaptiveAgent']:
+        """Find suitable agent for sharing resources"""
+        nearby_agents = self._get_nearby_agents(env_state)
+        if not nearby_agents:
+            return None
+            
+        # Use heart's trust system for decision
+        trust_threshold = self.heart.state.trust_baseline * empathy
+        
+        potential_targets = [
+            agent for agent in nearby_agents
+            if agent.energy < 50.0  # Only consider agents in need
+            and agent.heart.state.trust_baseline >= trust_threshold
+        ]
+        
+        return random.choice(potential_targets) if potential_targets else None
+
+    def _process_social_interaction(self, interaction_type: str, target_agent: 'AdaptiveAgent', 
+                                  outcome: float) -> None:
+        """Process and learn from social interactions"""
+        self.heart.record_interaction(interaction_type, outcome)
+        
+        # Update trust baseline based on interaction
+        trust_change = outcome * self.genetic_core.heart_genetics.adaptation_rate
+        self.heart.state.trust_baseline = max(0.1, min(1.0, 
+            self.heart.state.trust_baseline + trust_change
+        ))
+
+    def process_rest_cycle(self):
+        """Process experiences during rest/dream state"""
+        if self.energy < 30:
+            return
+            
+        dream_experiences = random.sample(self.memory_system.short_term, 
+                                        k=min(5, len(self.memory_system.short_term)))
+        
+        for experience in dream_experiences:
+            self.neural_net.process_dream(experience)
+            self.energy -= 0.1
 
 
 class SimulationDebugger:

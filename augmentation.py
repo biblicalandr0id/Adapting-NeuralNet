@@ -2,6 +2,9 @@ import torch
 import numpy as np
 import random
 import torchvision.transforms as transforms
+from enum import Enum
+from typing import Tuple, List, Dict, Optional
+from dataclasses import dataclass, field
 
 
 # --- ADAPTIVE DATA AUGMENTER (neural_augmentation.py) ---
@@ -11,7 +14,6 @@ class AdaptiveDataAugmenter:
                  augmentation_strategies=None):
         self.noise_levels = noise_levels
         self.current_noise_index = 0
-
         self.augmentation_strategies = augmentation_strategies or [
             'gaussian_noise',
             'dropout',
@@ -432,13 +434,13 @@ class NeuralDiagnostics:
 # --- AGENT IMPLEMENTATIONS (system-improvements.py + agent-implementations.py - Combined and Improved Neural Network and Environment) ---
 
 
-class ResourceType(Enum):  # From agent-architecture.py
+class ResourceType(Enum):
     ENERGY = "energy"
     INFORMATION = "information"
     MATERIALS = "materials"
 
 
-@dataclass  # From agent-architecture.py
+@dataclass
 class Resource:
     type: ResourceType
     quantity: float

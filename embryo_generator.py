@@ -1,16 +1,51 @@
 import os
 from datetime import datetime
-from embryo_namer import EmbryoNamer
 from genetics import GeneticCore
 import json
+from datetime import datetime
+import uuid
+from typing import Dict, Optional
+import random
+import logging
+from neural_networks import NeuralAdaptiveNetwork
+
+
+
+logger = logging.getLogger(__name__)
 
 
 class EmbryoGenerator:
-    def __init__(self, genetic_core: GeneticCore, embryo_namer: EmbryoNamer):
-        self.genetic_core = genetic_core
-        self.embryo_namer = embryo_namer
-        self.embryo_id = self.embryo_namer.generate_random_name()
-        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    """Handles the creation of new embryos with genetic traits"""
+    def __init__(self):
+        self.generation_count = 0
+        self.successful_embryos = 0
+        self.failed_attempts = 0
+
+    def generate_embryo(self, parent_genetics: Optional[Dict] = None) -> Tuple[GeneticCore, NeuralAdaptiveNetwork]:
+        """Generate a new embryo with optional parent genetics"""
+        try:
+            # Create genetic core
+            genetic_core = GeneticCore()
+            if parent_genetics:
+                genetic_core.inherit_from(parent_genetics)
+            else:
+                genetic_core.initialize_random_genetics()
+
+            # Generate neural network based on genetics
+            network_params = self._calculate_network_architecture(genetic_core)
+            neural_net = NeuralAdaptiveNetwork(
+                input_size=network_params['input_size'],
+                hidden_size=network_params['hidden_size'],
+                output_size=network_params['output_size']
+            )
+
+            self.successful_embryos += 1
+            return genetic_core, neural_net
+
+        except Exception as e:
+            self.failed_attempts += 1
+            logger.error(f"Failed to generate embryo: {str(e)}")
+            raise
 
     def generate_embryo_file(self, output_dir="embryos"):
         if not os.path.exists(output_dir):

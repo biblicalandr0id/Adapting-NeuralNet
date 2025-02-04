@@ -1,6 +1,6 @@
 # neural_networks.py
 import numpy as np
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,6 +8,9 @@ import torch.optim as optim
 
 class ImprovedAdaptiveNeuralNetwork(nn.Module):
     def __init__(self, input_size: int, hidden_sizes: List[int], output_size: int):
+        # Dynamic multi-layer architecture
+        # Experience buffer for learning
+        # Genetic modifier integration
         super().__init__()
         self.layers = nn.ModuleList()
 
@@ -62,6 +65,10 @@ class ImprovedAdaptiveNeuralNetwork(nn.Module):
 
 class GeneticLayer(nn.Module):
     def __init__(self, in_features, out_features, genetic_traits):
+# Layer normalization
+        # Compression gate
+        # Importance generator
+        # Adaptive activation functions
         super().__init__()
         self.layer = nn.Linear(in_features, out_features)
         self.layer_norm = nn.LayerNorm(out_features)
@@ -181,18 +188,12 @@ class NeuralAdaptiveNetwork(nn.Module):
         # Initialize states
         self.reset_states()
         
-    def forward(self, x, context):
+    def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
         batch_size = x.shape[0]
         device = x.device
         
-        # Ensure context tensor
-        if not isinstance(context, torch.Tensor):
-            context = torch.tensor([[context]], dtype=torch.float32, device=device)
-        if context.dim() == 1:
-            context = context.unsqueeze(0)
-        if context.shape[0] != batch_size:
-            context = context.expand(batch_size, -1)
-        context = context.to(device)
+        if context is None:
+            context = torch.zeros(batch_size, 1, device=device)
             
         # Process through genetic layers
         importance_signals = []
@@ -247,6 +248,51 @@ class NeuralAdaptiveNetwork(nn.Module):
                     if module.bias is not None and module.bias.grad is not None:
                         module.bias -= module.bias.grad * learning_rate * plasticity
 
+    def process_dream(self, experience: Dict):
+        """Process experiences during dream state for memory consolidation"""
+        # Extract experience data
+        state = torch.tensor(experience['state'], dtype=torch.float32)
+        action = torch.tensor(experience['action'], dtype=torch.float32)
+        reward = torch.tensor(experience['reward'], dtype=torch.float32)
+        
+        # Dream-state plasticity modifier
+        dream_plasticity = self.mind_genetics.creativity * 1.5
+        
+        # Process through network with higher plasticity
+        output, importance = self.forward(state)
+        self.backward(state, action, learning_rate=0.01, plasticity=dream_plasticity)
+        
+        # Update memory cells with experience
+        with torch.no_grad():
+            for i, cell in enumerate(self.memory_cells):
+                if i >= len(self.h_states):  # Handle dynamic memory cell count
+                    self.h_states.append(torch.zeros(state.shape[0], cell.lstm_size, device=state.device))
+                    self.c_states.append(torch.zeros(state.shape[0], cell.lstm_size, device=state.device))
+                elif self.h_states[i].shape[0] != state.shape[0]:  # Handle batch size changes
+                    self.h_states[i] = torch.zeros(state.shape[0], cell.lstm_size, device=state.device)
+                    self.c_states[i] = torch.zeros(state.shape[0], cell.lstm_size, device=state.device)
+                    
+                self.h_states[i], self.c_states[i] = cell(state, (self.h_states[i], self.c_states[i]))
+                state = self.h_states[i]
+
+    def adapt_network(self):
+        """Adapt network architecture based on genetic traits"""
+        # Update layer complexity
+        hidden_size = max(64, int(64 * self.mind_genetics.memory_capacity))
+        num_layers = max(2, int(2 * self.mind_genetics.pattern_recognition))
+        
+        # Adjust memory cells
+        num_memory_cells = max(1, int(2 * self.mind_genetics.cognitive_growth_rate))
+        if len(self.memory_cells) != num_memory_cells:
+            new_cells = nn.ModuleList([
+                GeneticMemoryCell(hidden_size, hidden_size, self.mind_genetics)
+                for _ in range(num_memory_cells - len(self.memory_cells))
+            ])
+            self.memory_cells.extend(new_cells)
+        
+        # Reset states for new configuration
+        self.reset_states()
+
 
 class NeuralLayer(nn.Module):
     def __init__(self, in_features, out_features, genetic_traits):
@@ -257,9 +303,9 @@ class NeuralLayer(nn.Module):
         
     def _get_activation(self, pattern_recognition):
         # Higher pattern recognition -> more complex activation
-        if pattern_recognition > 1.5:
+        if (pattern_recognition > 1.5):
             return nn.GELU()
-        elif pattern_recognition > 1.0:
+        elif (pattern_recognition > 1.0):
             return nn.ReLU()
         else:
             return nn.LeakyReLU(0.1)

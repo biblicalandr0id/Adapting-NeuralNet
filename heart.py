@@ -11,6 +11,8 @@ import logging
 #from watchdog.events import FileSystemEventHandler #Removed watchdog imports
 import shutil
 
+logger = logging.getLogger(__name__)
+
 @dataclass
 class SecurityMemory:
     """Stores security experiences and trust levels"""
@@ -18,6 +20,23 @@ class SecurityMemory:
     threat_patterns: Dict[str, float] = field(default_factory=dict)
     interaction_history: List[Dict] = field(default_factory=list)
     component_checksums: Dict[str, str] = field(default_factory=dict)
+
+@dataclass
+class HeartState:
+    """Represents the current state of the heart system"""
+    rhythm: float = 1.0
+    energy_level: float = 100.0
+    stress_level: float = 0.0
+    recovery_rate: float = 1.0
+    health: float = 100.0
+    adaptation_progress: float = 0.0
+    trust_baseline: float = 0.5  # Base trust level
+    emotional_state: Dict[str, float] = field(default_factory=lambda: {
+        'fear': 0.0,
+        'trust': 0.5,
+        'cooperation': 0.5,
+        'aggression': 0.0
+    })
 
 class HeartSecurity:
     def __init__(self, component_paths: Dict[str, str]):
@@ -127,7 +146,7 @@ class HeartSecurity:
         # Remove all component files
         for path in self.component_paths.values():
             try:
-                if os.path.exists(path):
+                if os.path.exists(path)):
                     secure_delete(path)
             except Exception as e:
                 logging.error(f"Error during self-destruct: {e}")
@@ -200,6 +219,88 @@ def secure_delete(path: str):
 def create_heart_security(component_paths: Dict[str, str]) -> HeartSecurity:
     """Factory function to create heart security system"""
     return HeartSecurity(component_paths)
+
+class HeartSystem:
+    """Manages the heart functions and emotional state of an agent"""
+    def __init__(self, genetics):
+        self.genetics = genetics
+        self.state = HeartState()
+        self.memory = []  # Stores recent heart events
+        self.adaptation_threshold = 0.7
+        self.trust_memory = []  # Track trust-related interactions
+        
+    def update(self, environment_state: Dict, agent_activity: float) -> Dict:
+        """Update heart state and emotional responses"""
+        try:
+            # Calculate base metrics
+            stress_factor = self._calculate_stress(environment_state, agent_activity)
+            self.state.rhythm = self._adjust_rhythm(stress_factor)
+            
+            # Update trust and emotional state
+            self._update_emotional_state(environment_state)
+            
+            # Calculate energy consumption
+            energy_consumption = self._calculate_energy_consumption(
+                self.state.rhythm, 
+                agent_activity
+            )
+            self.state.energy_level -= energy_consumption
+            
+            # Recovery if needed
+            if self.state.stress_level > self.adaptation_threshold:
+                self._trigger_recovery()
+            
+            self._apply_recovery()
+            
+            return self._get_heart_metrics()
+            
+        except Exception as e:
+            logger.error(f"Heart update error: {str(e)}")
+            return {}
+    
+    def _update_emotional_state(self, env_state: Dict) -> None:
+        """Update emotional state based on environment and genetics"""
+        # Update trust baseline based on experiences
+        if self.trust_memory:
+            recent_experiences = self.trust_memory[-10:]  # Last 10 interactions
+            trust_adjustment = sum(exp['outcome'] for exp in recent_experiences) / len(recent_experiences)
+            self.state.trust_baseline = max(0.1, min(1.0, 
+                self.state.trust_baseline + trust_adjustment * self.genetics.heart_genetics.adaptation_rate
+            ))
+        
+        # Update other emotional states
+        threat_level = len(env_state.get('threats', []))
+        self.state.emotional_state['fear'] = min(1.0, threat_level * 0.2)
+        self.state.emotional_state['aggression'] = max(0.0, 
+            self.state.stress_level - self.genetics.heart_genetics.resilience
+        )
+    
+    def record_interaction(self, interaction_type: str, outcome: float) -> None:
+        """Record social interaction outcomes for trust adaptation"""
+        self.trust_memory.append({
+            'type': interaction_type,
+            'outcome': outcome,
+            'timestamp': datetime.now()
+        })
+        
+        # Trim old memories
+        if len(self.trust_memory) > 100:
+            self.trust_memory = self.trust_memory[-100:]
+
+class EmotionalCore:
+    """Deep emotional processing system"""
+    def __init__(self, heart_system: HeartSystem):
+        self.heart = heart_system
+        self.emotional_memory = []
+        self.bonding_threshold = 0.7
+        self.emotional_states = {
+            'joy': 0.0,
+            'sadness': 0.0,
+            'fear': 0.0,
+            'anger': 0.0,
+            'curiosity': 0.5,
+            'attachment': 0.0
+        }
 
 # Example usage:
 if __name__ == "__main__":

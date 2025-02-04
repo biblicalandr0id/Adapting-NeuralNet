@@ -1,5 +1,11 @@
-# main.py
-from genetics import create_genetic_core, GeneticCore
+from typing import Dict, List, Tuple
+import logging
+import pygame
+import sys
+import os
+from datetime import datetime
+
+from genetics import GeneticCore
 from embryo_namer import EmbryoNamer
 from embryo_generator import EmbryoGenerator
 from neural_networks import NeuralAdaptiveNetwork
@@ -10,71 +16,73 @@ import torch
 import numpy as np
 import json
 from agent import AdaptiveAgent
+import random
+from visualizer import Visualizer
+from brainui import create_brain_interface
+from mind import create_embryo
+from dna import create_dna_guide
+from utils.logger_config import setup_logging
+from predator import AdaptivePredator
+from birth_records import BirthRegistry
+from simulation_runner import SimulationManager
+
+def calculate_network_architecture(genetic_core: GeneticCore) -> Dict[str, int]:
+    """Calculate neural network architecture based on genetic traits"""
+    # Base sizes
+    base_input = 10
+    base_hidden = 20
+    base_output = 5
+    
+    # Scale factors based on genetic traits
+    brain_complexity = (
+        genetic_core.brain_genetics.processing_speed * 0.4 +
+        genetic_core.mind_genetics.learning_efficiency * 0.3 +
+        genetic_core.mind_genetics.creativity * 0.3
+    )
+    
+    # Adjust network size based on genetics
+    hidden_scaling = 1.0 + brain_complexity
+    input_scaling = 1.0 + genetic_core.physical_genetics.sensor_sensitivity * 0.5
+    output_scaling = 1.0 + genetic_core.mind_genetics.adaptation_rate * 0.3
+    
+    return {
+        'input_size': int(base_input * input_scaling),
+        'hidden_size': int(base_hidden * hidden_scaling),
+        'output_size': int(base_output * output_scaling)
+    }
+
+def main():
+    # Setup paths
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(base_dir)
+    
+    # Create necessary directories
+    dirs = ['logs', 'data', 'simulation_results']
+    for dir_name in dirs:
+        os.makedirs(dir_name, exist_ok=True)
+    
+    # Setup logging
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Initialize simulation
+        config = {
+            'env_width': 800,
+            'env_height': 600,
+            'display_width': 1024,
+            'display_height': 768,
+            'initial_population': 10,
+            'debug_mode': True
+        }
+        
+        simulation = SimulationManager(config)
+        simulation.initialize_population()
+        simulation.run_simulation()
+        
+    except Exception as e:
+        logger.critical(f"Application crashed: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
-    genetic_core = create_genetic_core(seed=42)
-    embryo_namer = EmbryoNamer()
-    generator = EmbryoGenerator(genetic_core, embryo_namer)
-    embryo_file = generator.generate_embryo_file()
-    size = (100, 100)
-    complexity = 1.0
-    environment = AdaptiveEnvironment(size, complexity)
-
-    # Neural network configuration
-    input_size = len(AdaptiveAgent(genetic_core, None, (50, 50)).perceive_environment(environment.current_state))  # Dynamic input size
-    output_size = 32  # Fixed size for action encoding
-    
-    # Create neural network with genetic traits
-    neural_net = NeuralAdaptiveNetwork(
-        input_size=input_size,
-        output_size=output_size,
-        genetic_core=genetic_core
-    )
-
-    diagnostics = NeuralDiagnostics(neural_net)
-
-    agent_position = (50, 50)
-    agent = AdaptiveAgent(genetic_core, neural_net, agent_position)
-    environment.agents.append(agent)
-    executor = AdaptiveExecutor(neural_net)
-
-    env_state = environment.current_state
-    env_state.resources = [
-        Resource(type=ResourceType.ENERGY, quantity=100,
-                 position=(20, 20), complexity=0.2),
-        Resource(type=ResourceType.MATERIALS, quantity=50,
-                 position=(70, 70), complexity=0.8)
-    ]
-    env_state.threats = [(80, 80)]
-
-    neural_net.eval()  # Set network to evaluation mode - BEFORE the loop
-
-    for step in range(2):
-        env_state = environment.current_state
-        action, params = agent.decide_action(env_state)
-        result = agent.execute_action(action, params, env_state)
-        executor.record_validation_loss(result.reward)
-        loss, outputs, importance = executor.execute(
-            inputs=torch.tensor(agent.perceive_environment(
-                env_state)).float().reshape(1, -1),
-            targets=torch.tensor(
-                np.zeros(64)).float().reshape(1, -1),
-            context=torch.tensor([[0.0]]),
-            diagnostics=diagnostics
-        )
-        diagnostics = agent.neural_diagnostics.monitor_network_health(
-            inputs=torch.tensor(agent.perceive_environment(
-                env_state)).float().detach().numpy().reshape(1, -1),
-            targets=torch.tensor(
-                np.zeros(64)).float().reshape(1, -1),
-            context=torch.tensor([[0.0]]),
-            epoch=env_state.time_step
-        )
-
-        print(json.dumps(diagnostics, indent=2))
-        print(
-            f"Step: {step+1}, Action: {action}, Reward: {result.reward:.4f}, Energy: {agent.energy:.2f}")
-        # Step the environment forward, passing in list of agents
-        environment.step([agent])
-
-    print("\nAgent Status after 2 steps:", agent.get_status())
+    main()

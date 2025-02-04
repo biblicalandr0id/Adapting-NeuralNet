@@ -1,15 +1,15 @@
 #dna.py
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import numpy as np
 import math
 
 @dataclass
 class PhysicalAttributes:
     """Physical capabilities and limitations"""
-    size: float = 1.0  # Base unit size
+    size: float = 0.1  # Base unit size
     energy_capacity: float = 100.0
-    processing_speed: float = 1.0
+    processing_speed: float = 0.5
     memory_capacity: float = 1000.0
     sensor_resolution: float = 1.0
     action_precision: float = 1.0
@@ -131,17 +131,15 @@ class DNAGuide:
             "action_precision_range": (0, self.physical_attributes.action_precision)
         }
     
-    def can_perform_action(self, action_requirements: Dict[str, float]) -> Tuple[bool, str]:
-        """Check if an action is physically possible given current development"""
-        constraints = self.get_growth_constraints()
-        
-        for requirement, value in action_requirements.items():
-            if requirement in constraints:
-                min_val, max_val = constraints[requirement]
-                if value > max_val:
-                    return False, f"Action exceeds {requirement} capability"
-        
-        return True, "Action within physical capabilities"
+    def can_perform_action(self, requirements: Dict[str, float]) -> Tuple[bool, str]:
+        """Check if physical capabilities meet action requirements"""
+        if requirements["energy_usage"] > self.physical_attributes.energy_capacity:
+            return False, "Insufficient energy capacity"
+            
+        if requirements["processing_speed_range"] > self.physical_attributes.processing_speed:
+            return False, "Processing speed too low"
+            
+        return True, "Action permitted"
 
 def create_dna_guide(growth_pattern: str = "balanced") -> DNAGuide:
     """Factory function to create a new DNA guide"""
