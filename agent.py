@@ -8,11 +8,11 @@ import math
 import random
 import torch
 import torch.nn.functional as F
+import torchvision.transforms as transforms
 from genetics import GeneticCore
 from neural_networks import NeuralAdaptiveNetwork
 from executor import AdaptiveExecutor
 from diagnostics import NeuralDiagnostics
-from augmentation import AdaptiveDataAugmenter
 from embryo_namer import EmbryoNamer
 from adaptive_environment import AdaptiveEnvironment, ResourceType, Resource, EnvironmentalState
 from mind import AgentEmbryo, create_embryo
@@ -20,7 +20,7 @@ from dna import DNAGuide, create_dna_guide
 from heart import HeartSecurity, create_heart_security
 from brainui import create_brain_interface, BrainInterface
 from functools import partial
-import torchvision
+
 
 
 @dataclass
@@ -70,6 +70,136 @@ class ActionDecoder:
                 selected_action = name
 
         return selected_action, best_similarity.item()
+
+class AdaptiveDataAugmenter:
+    def __init__(self,
+                 noise_levels=[0.1, 0.3, 0.5, 0.7],
+                 augmentation_strategies=None):
+        self.noise_levels = noise_levels
+        self.current_noise_index = 0
+        self.augmentation_strategies = augmentation_strategies or [
+            'gaussian_noise',
+            'dropout',
+            'mixup',
+            'feature_space_augmentation',
+            'horizontal_flip',  # New Augmentation
+            'vertical_flip',   # New Augmentation
+            # 'temporal_warping' # Temporal warping removed from defaults
+        ]
+        self.current_strategy_index = 0
+
+        self.augmentation_history = {
+            'applied_strategies': [],
+            'noise_levels': [],
+            'performance_impact': []
+        }
+        self.horizontal_flip_transform = transforms.RandomHorizontalFlip(
+            p=0.5)  # Pre-initialize transforms
+        self.vertical_flip_transform = transforms.RandomVerticalFlip(p=0.5)
+
+    def augment(self, data, context=None):
+        """
+        Augment data with multiple strategies, including new flips.
+        """
+        strategy = self.augmentation_strategies[self.current_strategy_index]
+        noise_scale = self.noise_levels[self.current_noise_index]
+
+        augmented_data = self._apply_augmentation(
+            data, strategy, noise_scale, context)
+
+        self.augmentation_history['applied_strategies'].append(strategy)
+        self.augmentation_history['noise_levels'].append(noise_scale)
+
+        return augmented_data
+
+    def _apply_augmentation(self, data, strategy, noise_scale, context=None):
+        """Apply augmentation strategies, including flips."""
+        if strategy == 'gaussian_noise':
+            return data + torch.randn_like(data) * noise_scale
+
+        elif strategy == 'dropout':
+            mask = torch.bernoulli(torch.full(
+                data.shape, 1 - noise_scale)).bool()
+            return data.masked_fill(mask, 0)
+
+        elif strategy == 'mixup':
+            batch_size = data.size(0)
+            shuffle_indices = torch.randperm(batch_size)
+            lam = np.random.beta(noise_scale, noise_scale)
+            return lam * data + (1 - lam) * data[shuffle_indices]
+
+        elif strategy == 'feature_space_augmentation':
+            transform_matrix = torch.randn_like(
+                data) * noise_scale * data.std()
+            return data + transform_matrix
+
+        elif strategy == 'horizontal_flip':  # Horizontal Flip Augmentation
+            return self.horizontal_flip_transform(data)
+
+        elif strategy == 'vertical_flip':   # Vertical Flip Augmentation
+            return self.vertical_flip_transform(data)
+
+        elif strategy == 'temporal_warping':  # Temporal Warping - kept, but not in defaults
+            seq_len = data.size(1)
+            warp_points = np.sort(random.sample(
+                range(seq_len), int(seq_len*noise_scale)))
+            warped_data = data.clone()
+            for point in warp_points:
+                offset = random.choice([-1, 1])
+                if 0 <= point + offset < seq_len:
+                    warped_data[:, point] = (
+                        data[:, point] + data[:, point + offset]) / 2
+            return warped_data
+
+        return data
+
+    def adjust_augmentation(self, network_performance, diagnostics=None):
+        """Adjust augmentation based on performance and diagnostics."""
+        base_adjustment = self._compute_adjustment(
+            network_performance, diagnostics)
+
+        if base_adjustment < 0.4:  # Adjusted thresholds for more frequent changes
+            self.current_noise_index = min(
+                self.current_noise_index + 1,
+                len(self.noise_levels) - 1
+            )
+            if base_adjustment < 0.2:  # More aggressive strategy switch at lower performance
+                self.current_strategy_index = (
+                    self.current_strategy_index + 1
+                ) % len(self.augmentation_strategies)
+        elif base_adjustment > 0.7:  # Adjusted thresholds
+            self.current_noise_index = max(
+                self.current_noise_index - 1,
+                0
+            )
+
+        self.augmentation_history['performance_impact'].append(base_adjustment)
+        return self.noise_levels[self.current_noise_index]
+
+    def _compute_adjustment(self, performance, diagnostics=None):
+        """Compute adjustment score based on performance and diagnostics."""
+        if diagnostics is None:
+            return performance
+
+        sparsity = diagnostics.get('activation_analysis', {}).get(
+            'activation_sparsity', 0)
+        curvature = diagnostics.get(
+            'loss_landscape', {}).get('loss_curvature', 0)
+        grad_norm_ratio = diagnostics.get('gradient_analysis', {}).get(
+            'grad_norm_ratio', 0)  # Use grad norm ratio
+
+        # More weight on sparsity and grad_norm_ratio in adjustment
+        adjustment_score = (performance + (1 - sparsity) * 2 -
+                            curvature/10 + (1-grad_norm_ratio)) / 4.5  # Adjusted weights
+        return adjustment_score
+    
+    def adjust_augmentation(self, network_performance: float, diagnostics: Dict):
+        pass
+    
+    
+    def get_augmentation_report(self):
+        """Generate augmentation report."""
+        return self.augmentation_history
 
 
 class AdaptiveAgent:
@@ -214,8 +344,12 @@ class AdaptiveAgent:
             action_key) / energy_efficiency
 
         if self.energy < energy_cost:
-            # Negative reward for failed action
-            return ActionResult(False, -1.0, 0.0, None)
+                        return ActionResult(
+                success=False,
+                reward=-0.5,
+                energy_cost=0.0,
+                new_state={'error': 'insufficient_energy'}
+)
 
         # Action execution logic influenced by genetic traits...
         success_prob = self._calculate_success_probability(
@@ -297,11 +431,19 @@ class AdaptiveAgent:
                 direction = self._calculate_direction_to(
                     resource.position, env_state)
                 direction_vector += direction * weight
+                distance = self._calculate_distance(resource.position)
+                attraction = self._normalize_distance(distance, 20.0)
+                direction = self._calculate_direction_to(resource.position, env_state)
+                direction_vector += direction * attraction * resource.quantity
 
             for threat in visible_threats:
                 weight = genetic_params['security_sensitivity']
                 direction = self._calculate_direction_to(threat, env_state)
                 direction_vector -= direction * weight  # Repulsion
+                distance = self._calculate_distance(threat)
+                repulsion = self._normalize_distance(distance, 15.0)
+                direction = self._calculate_direction_to(threat, env_state)
+                direction_vector -= direction * repulsion * 2.0  # Threats have stronger influence
 
             params['direction'] = self._normalize_vector(direction_vector)
             params['speed'] = min(2.0, self.energy / 50.0) * \
@@ -351,49 +493,148 @@ class AdaptiveAgent:
         return params
 
     def _process_action_result(self, action: str, params: Dict, energy_cost: float, success_prob: float, env_state: EnvironmentalState) -> ActionResult:
-        """Placeholder: Process gathering action and return reward"""
-        success = False
-        reward = 0.0
-        new_state = {}
-
-        # Assume action succeeds based on probability
-        if random.random() < success_prob:
-            success = True
-
-        action_process_function = self.actions.get(action)
-        if action_process_function:
-            reward = action_process_function(params, success, env_state)
-
-        # Update efficiency score based on reward/energy cost ratio
-        if energy_cost > 0:
-            self.efficiency_score = (
-                self.efficiency_score + max(0, reward)/energy_cost) / 2
-
-        return ActionResult(success, reward, energy_cost, new_state)
+        """Process action results using genetic traits and neural network"""
+        # Get relevant genetic traits
+        learning_efficiency = self.genetic_core.mind_genetics.learning_efficiency
+        adaptation_rate = self.genetic_core.mind_genetics.adaptation_rate
+        neural_plasticity = self.genetic_core.mind_genetics.neural_plasticity
+        
+        # Create neural network input
+        action_encoding = torch.zeros(len(self.actions))
+        action_index = list(self.actions.keys()).index(action)
+        action_encoding[action_index] = 1.0
+        
+        genetic_encoding = torch.tensor([
+            learning_efficiency,
+            adaptation_rate,
+            neural_plasticity,
+            energy_cost / 10.0,
+            success_prob,
+            self.energy / 100.0
+        ])
+        
+        network_input = torch.cat([action_encoding, genetic_encoding])
+        
+        # Get neural network prediction for outcome
+        with torch.no_grad():
+            outcome_prediction, hidden_state = self.neural_net.forward(
+                network_input.unsqueeze(0),
+                context=torch.tensor([[adaptation_rate]])
+            )
+        
+        # Rest of the method implementation...
+        success_threshold = torch.sigmoid(outcome_prediction[0])
+        genetic_modifier = (learning_efficiency + neural_plasticity) / 2.0
+        final_success_prob = float(success_prob * success_threshold * genetic_modifier)
+        
+        success = random.random() < final_success_prob
+        
+        if success:
+            action_method = self.actions.get(action)
+            if action_method:
+                if action == "gather":
+                    reward = action_method(params, success, env_state)
+                else:
+                    reward = action_method(params, success)
+                reward *= (1.0 + learning_efficiency * 0.2)
+            else:
+                reward = 0.0
+        else:
+            base_penalty = -0.1 * energy_cost
+            penalty_modifier = (1.0 - neural_plasticity * 0.3)
+            reward = base_penalty * penalty_modifier
+        
+        # Update neural network based on outcome
+        self._update_network(network_input, success, reward, hidden_state)
+        
+        new_state = {
+            'energy': self.energy - energy_cost,
+            'success': success,
+            'reward': reward,
+            'action': action,
+            'genetic_influence': {
+                'learning_efficiency': learning_efficiency,
+                'adaptation_rate': adaptation_rate,
+                'neural_plasticity': neural_plasticity
+            }
+        }
+        
+        return ActionResult(
+            success=success,
+            reward=reward,
+            energy_cost=energy_cost,
+            new_state=new_state
+        )
 
     def _calculate_energy_cost(self, action: str) -> float:
-        """Base energy cost for actions - can be adjusted based on action and genetics"""
-        base_costs = {
-            "move": 1.0,
-            "gather": 2.0,
-            "process": 5.0,
-            "share": 1.5,
-            "defend": 3.0,
-            "execute_tool": 7.0
-        }
-        return base_costs.get(action, 1.0)
+        """Calculate energy cost based on genetic traits and neural network prediction"""
+        # Get relevant genetic traits
+        energy_efficiency = self.genetic_core.physical_genetics.energy_efficiency
+        metabolic_rate = self.genetic_core.physical_genetics.metabolic_rate
+        processing_speed = self.genetic_core.brain_genetics.processing_speed
+        
+        # Create neural network input vector
+        action_encoding = torch.zeros(len(self.actions))
+        action_index = list(self.actions.keys()).index(action)
+        action_encoding[action_index] = 1.0
+        
+        genetic_encoding = torch.tensor([
+            energy_efficiency,
+            metabolic_rate,
+            processing_speed,
+            self.energy / 100.0  # Current energy level
+        ])
+        
+        network_input = torch.cat([action_encoding, genetic_encoding])
+        
+        # Get neural network prediction
+        with torch.no_grad():
+            cost_prediction, _ = self.neural_net.forward(
+                network_input.unsqueeze(0),
+                context=torch.tensor([[metabolic_rate]])  # Use metabolic rate as context
+            )
+        
+        # Apply genetic modifiers to base cost
+        base_cost = torch.sigmoid(cost_prediction[0]) * 10.0
+        modified_cost = base_cost * (1.0 / energy_efficiency) * metabolic_rate
+        
+        return float(max(0.1, modified_cost))
 
     def _calculate_success_probability(self, action: str, structural_integrity: float) -> float:
-        """Probability of action success influenced by structural integrity"""
-        base_probabilities = {
-            "move": 0.95,
-            "gather": 0.8,
-            "process": 0.7,
-            "share": 0.99,
-            "defend": 0.6,
-            "execute_tool": 0.9
-        }
-        return base_probabilities.get(action, 0.8) * structural_integrity
+        """Calculate success probability using genetic traits and neural prediction"""
+        # Get relevant genetic traits
+        adaptation_rate = self.genetic_core.mind_genetics.adaptation_rate
+        precision = self.genetic_core.physical_genetics.action_precision
+        learning_efficiency = self.genetic_core.mind_genetics.learning_efficiency
+        
+        # Create neural network input
+        action_encoding = torch.zeros(len(self.actions))
+        action_index = list(self.actions.keys()).index(action)
+        action_encoding[action_index] = 1.0
+        
+        genetic_encoding = torch.tensor([
+            structural_integrity,
+            precision,
+            adaptation_rate,
+            learning_efficiency,
+            self.successful_interactions / max(1, self.survival_time)
+        ])
+        
+        network_input = torch.cat([action_encoding, genetic_encoding])
+        
+        # Get neural network prediction
+        with torch.no_grad():
+            prob_prediction, _ = self.neural_net.forward(
+                network_input.unsqueeze(0),
+                context=torch.tensor([[adaptation_rate]])
+            )
+        
+        # Apply genetic modifiers to base probability
+        base_prob = torch.sigmoid(prob_prediction[0])
+        modified_prob = base_prob * precision * (1.0 + learning_efficiency * 0.2)
+        
+        # Ensure probability stays in valid range
+        return float(max(0.1, min(0.95, modified_prob)))
 
     def _update_metrics(self, result: ActionResult):
         """Update agent performance metrics based on action result"""
@@ -534,3 +775,89 @@ class AdaptiveAgent:
             (self.position[0] - target_pos[0])**2 +
             (self.position[1] - target_pos[1])**2
         )
+    
+    def create_action(self, need_type: str, env_state: EnvironmentalState) -> Optional[Tuple[str, callable]]:
+        # Get relevant genetic traits for action creation
+        creativity = self.genetic_core.mind_genetics.creativity
+        adaptability = self.genetic_core.mind_genetics.adaptation_rate
+        intelligence = self.genetic_core.brain_genetics.processing_speed
+        
+        # Calculate creation probability based on genetic traits
+        creation_threshold = (creativity + adaptability + intelligence) / 3.0
+        
+        if random.random() > creation_threshold:
+            return None  # Failed to create new action
+        
+        # Generate action components based on need type
+        components = {
+            'energy': ['gather', 'convert', 'optimize'],
+            'defense': ['evade', 'shield', 'counter'],
+            'social': ['communicate', 'collaborate', 'trade'],
+            'exploration': ['scan', 'analyze', 'map']
+        }
+        
+        # Create neural network input for action design
+        design_input = torch.tensor([
+            creativity,
+            adaptability,
+            intelligence,
+            self.energy / 100.0,
+            len(self.actions) / 10.0  # Normalized current action count
+        ]).float()
+        
+        # Get network prediction for action design
+        with torch.no_grad():
+            design_output, _ = self.neural_net.forward(
+                design_input.unsqueeze(0),
+                context=torch.tensor([[creativity]])
+            )
+        
+        # Generate action name and basic components
+        base_components = components.get(need_type, ['generic'])
+        action_name = f"{random.choice(base_components)}_{len(self.actions)}"
+        
+        # Store traits in a closure for the new action method
+        traits = {
+            'creativity': creativity,
+            'intelligence': intelligence,
+            'adaptability': adaptability
+        }
+        
+        # Define the new action method
+        def new_action_method(self, params: Dict, success: bool, env_state: EnvironmentalState = None) -> float:
+            if not success:
+                return -0.1
+                
+            base_reward = 0.2 * traits['creativity']  # Higher creativity = higher potential reward
+            efficiency_bonus = 0.1 * traits['intelligence']  # Higher intelligence = better execution
+            adaptation_modifier = 0.1 * traits['adaptability']  # Higher adaptability = better environmental fit
+            
+            # Calculate total reward based on genetic traits and current state
+            total_reward = (base_reward + efficiency_bonus) * (1.0 + adaptation_modifier)
+            
+            # Update agent state based on action execution
+            self.energy -= 0.1 * (1.0 - traits['creativity'])  # More creative actions use less energy
+            self.efficiency_score += 0.01 * traits['intelligence']
+            
+            return float(total_reward)
+        
+        # Create action vector for the new action
+        action_vector = torch.randn(32)  # Random initial action vector
+        self.action_decoder.add_action(action_name, action_vector, new_action_method)
+        
+        # Add to available actions
+        self.actions[action_name] = new_action_method
+        
+        # Log action creation
+        print(f"Created new action: {action_name} for need: {need_type}")
+        
+        return action_name, new_action_method
+    
+    def decide_action(self, env_state: EnvironmentalState) -> Tuple[str, Dict]:
+        if self.energy < 30.0:  # Low energy state
+            new_action = self.create_action('energy', env_state)
+            if new_action:
+                action_name, _ = new_action
+                params = self._generate_action_params(action_name, trust_baseline, env_state)
+        return action_name, params
+            
