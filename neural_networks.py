@@ -488,7 +488,7 @@ class AdaptiveStateManager(nn.Module):
             for cell in self.memory_cells:
                 processed_state = torch.relu(cell(processed_state))
 
-        if context.dim() == 2 and context.shape[1] != 1:
+        if context.dim() == 2 && context.shape[1] != 1:
             context = context[:, :1]
 
         compression_signal = self.compression_gate(
@@ -513,3 +513,66 @@ class AdaptiveStateManager(nn.Module):
             )
 
         return compressed_state, self.state_importance
+
+
+class MemorySystem(nn.Module):
+    def __init__(self, size: int, retention: float, processing_speed: float):
+        super().__init__()
+        self.memory_bank = nn.Parameter(torch.zeros(size, 512))
+        self.retention = retention
+        self.processing_speed = processing_speed
+        
+    def query(self, x: torch.Tensor) -> torch.Tensor:
+        # Similarity-based memory retrieval
+        similarities = F.cosine_similarity(x.unsqueeze(1), self.memory_bank, dim=2)
+        attention = F.softmax(similarities * self.processing_speed, dim=1)
+        return torch.matmul(attention, self.memory_bank)
+        
+    def update(self, x: torch.Tensor, importance: torch.Tensor) -> None:
+        # Update memory based on importance and retention
+        update_mask = importance > (1 - self.retention)
+        self.memory_bank.data[update_mask] = x[update_mask]
+
+class PatternDetectionLayer(nn.Module):
+    def __init__(self, input_size: int, sensitivity: float):
+        super().__init__()
+        self.sensitivity = sensitivity
+        self.pattern_bank = nn.Parameter(torch.randn(32, input_size))
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Pattern detection with genetic sensitivity
+        similarities = F.cosine_similarity(x.unsqueeze(1), 
+                                        self.pattern_bank, dim=2)
+        return similarities * self.sensitivity
+
+class AdaptiveLayer(nn.Module):
+    def __init__(self, size: int, creativity: float, adaptation_rate: float):
+        super().__init__()
+        self.weights = nn.Parameter(torch.randn(size, size))
+        self.creativity = creativity
+        self.adaptation_rate = adaptation_rate
+        
+    def forward(self, x: torch.Tensor, patterns: torch.Tensor) -> torch.Tensor:
+        # Adaptive processing influenced by genetics
+        adaptation = patterns.mean() * self.adaptation_rate
+        creative_noise = torch.randn_like(x) * self.creativity
+        return x + torch.matmul(x, self.weights) * adaptation + creative_noise
+
+class NeuralBehavior:
+    """Handles neural network based decision making"""
+    def __init__(self, neural_net: NeuralAdaptiveNetwork, genetic_core: GeneticCore):
+        self.neural_net = neural_net
+        self.genetic_core = genetic_core
+        
+    def process_perception(self, env_state: EnvironmentalState) -> np.ndarray:
+        # Move perception logic here
+        pass
+        
+    def decide_action(self, sensor_data: np.ndarray) -> Tuple[str, Dict]:
+        # Move neural decision making here
+        pass
+        
+    def learn_from_experience(self, state: np.ndarray, action: str, 
+                            result: ActionResult) -> None:
+        # Move learning logic here
+        pass

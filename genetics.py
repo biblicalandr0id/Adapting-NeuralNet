@@ -867,3 +867,37 @@ def create_offspring(parent1: 'GeneticCore', parent2: 'GeneticCore') -> 'Genetic
     
     return offspring
 pass
+
+# genetics.py
+
+@dataclass
+class GeneticTraits:
+    mind_genetics: MindGenetics
+    brain_genetics: BrainGenetics
+    physical_genetics: PhysicalGenetics
+    heart_genetics: HeartGenetics
+
+@dataclass 
+class Lineage:
+    generation: int
+    parent_id: Optional[str]
+    birth_time: float
+    genetic_heritage: List[str]
+    mutations: List[Dict]  
+    achievements: List[Dict]
+
+class GeneticBehavior:
+    """Handles genetic influence on behavior"""
+    def __init__(self, genetic_core: GeneticCore):
+        self.genetic_core = genetic_core
+        
+    def calculate_success_probability(self, action: str, structural_integrity: float) -> float:
+        adaptation_rate = self.genetic_core.mind_genetics.adaptation_rate
+        precision = self.genetic_core.physical_genetics.action_precision
+        learning_efficiency = self.genetic_core.mind_genetics.learning_efficiency
+        return float(min(1.0, (adaptation_rate + precision + learning_efficiency) / 3.0))
+        
+    def calculate_energy_cost(self, action: str, base_cost: float) -> float:
+        energy_efficiency = self.genetic_core.physical_genetics.energy_efficiency
+        metabolic_rate = self.genetic_core.physical_genetics.metabolic_rate
+        return base_cost * (1.0 / energy_efficiency) * metabolic_rate

@@ -4,7 +4,6 @@ import random
 import logging
 import uuid
 from datetime import datetime
-from neural_networks import NeuralAdaptiveNetwork
 
 logger = logging.getLogger(__name__)
 
