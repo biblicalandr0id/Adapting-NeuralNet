@@ -1,9 +1,16 @@
 # neural_networks.py
 import numpy as np
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, TYPE_CHECKING, Type
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from base_types import BaseGeneticCore  # Changed from genetics import
+from genetics import GeneticCore  # This creates the cycle
+import logging
+
+# Configure logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class ImprovedAdaptiveNeuralNetwork(nn.Module):
@@ -42,25 +49,45 @@ class ImprovedAdaptiveNeuralNetwork(nn.Module):
 
         return output, activations
 
-    def backward(self, x: torch.Tensor, y: torch.Tensor, activations: List[torch.Tensor],
-                 learning_rate: float, plasticity: float) -> None:
-        m = x.shape[0]
-        criterion = nn.MSELoss()
-        output = activations[-1]
-        loss = criterion(output, y)
-
-        self.zero_grad()
+    def backward(self, x: torch.Tensor, y: torch.Tensor, learning_rate: float, plasticity: float):
+        """
+        Backward pass with genetic trait influence
+        Args:
+            x: Input tensor
+            y: Target tensor 
+            learning_rate: Base learning rate modified by genetics
+            plasticity: Neural plasticity from genetics
+        """
+        # Forward pass to get outputs and store activations
+        outputs, hidden_states = self.forward(x, self.state_manager.get_context())
+        
+        # Calculate loss with genetic influence
+        loss = self.criterion(outputs, y) * (1.0 + plasticity)
+        
+        # Zero existing gradients
+        self.optimizer.zero_grad()
+        
+        # Backward pass
         loss.backward()
-
-        with torch.no_grad():
-            for i, layer in enumerate(self.layers):
-                if layer.weight.grad is not None:
-                    dW = layer.weight.grad
-                    layer.weight -= dW * learning_rate * plasticity
-
-                if layer.bias.grad is not None:
-                    db = layer.bias.grad
-                    layer.bias -= db * learning_rate * plasticity
+        
+        # Apply genetic traits to gradient updates
+        for param in self.parameters():
+            if param.grad is not None:
+                # Scale gradients by plasticity and learning rate
+                param.grad *= plasticity
+                param.grad *= learning_rate
+                
+                # Apply adaptive noise based on plasticity
+                noise_scale = 0.01 * plasticity
+                param.grad += torch.randn_like(param.grad) * noise_scale
+        
+        # Update weights
+        self.optimizer.step()
+        
+        # Update memory cells with new learning
+        self.state_manager.update_memory(hidden_states, loss.item())
+        
+        return loss.item()
 
 
 class GeneticLayer(nn.Module):
@@ -158,35 +185,54 @@ class NeuralAdaptiveNetwork(nn.Module):
         super().__init__()
         self.mind_genetics = genetic_core.mind_genetics
         self.brain_genetics = genetic_core.brain_genetics
-        self.output_size = output_size  # Store for ActionVector compatibility
-        
-        # Base network size from cognitive capacity (minimum 64 to maintain depth)
+        self.output_size = output_size
+
+        # Base network parameters from genetics
         hidden_size = max(64, int(64 * self.mind_genetics.memory_capacity))
-        
-        # Number of layers from pattern recognition (minimum 2 for depth)
         num_layers = max(2, int(2 * self.mind_genetics.pattern_recognition))
         
-        # Create genetic layers
+        # Create state manager for memory handling
+        self.state_manager = AdaptiveStateManager(
+            input_dim=hidden_size,
+            hidden_dim=hidden_size,
+            adaptive_rate=self.brain_genetics.learning_rate,
+            memory_type='lstm'
+        )
+        
+        # Create genetic layers with state management
         self.layers = nn.ModuleList()
         current_size = input_size
         
         for i in range(num_layers):
             layer_size = int(hidden_size * (1 + 0.2 * (i - num_layers/2)))
-            self.layers.append(GeneticLayer(current_size, layer_size, self.brain_genetics))
+            genetic_layer = GeneticLayer(current_size, layer_size, self.brain_genetics)
+            self.layers.append(genetic_layer)
             current_size = layer_size
         
-        # Memory cells based on cognitive growth rate
+        # Memory cells from GeneticMemoryCell
         num_memory_cells = max(1, int(2 * self.mind_genetics.cognitive_growth_rate))
         self.memory_cells = nn.ModuleList([
             GeneticMemoryCell(current_size, hidden_size, self.mind_genetics)
             for _ in range(num_memory_cells)
         ])
         
-        # Output layer with proper size for action selection
         self.output = nn.Linear(hidden_size, output_size)
-        
-        # Initialize states
         self.reset_states()
+        
+        # Add optimizer initialization with genetic traits influence
+        learning_rate = self.brain_genetics.learning_rate
+        beta1 = max(0.5, min(0.99, self.mind_genetics.pattern_recognition))
+        beta2 = max(0.8, min(0.999, self.mind_genetics.learning_efficiency))
+        
+        self.optimizer = optim.Adam(
+            self.parameters(),
+            lr=learning_rate,
+            betas=(beta1, beta2),
+            eps=1e-8 * self.brain_genetics.neural_plasticity
+        )
+        
+        # Loss criterion with genetic scaling
+        self.criterion = nn.MSELoss()
         
     def forward(self, x: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
         batch_size = x.shape[0]
@@ -232,21 +278,45 @@ class NeuralAdaptiveNetwork(nn.Module):
                 self.h_states.append(torch.zeros(batch_size, cell.lstm_size, device=device))
                 self.c_states.append(torch.zeros(batch_size, cell.lstm_size, device=device))
                 
-    def backward(self, x: torch.Tensor, y: torch.Tensor, learning_rate: float = 0.01, plasticity: float = 1.0):
-        """Maintain backward compatibility with original implementation"""
-        criterion = nn.MSELoss()
-        output, _ = self.forward(x, torch.tensor([[0.0]]))
-        loss = criterion(output, y)
+    def backward(self, x: torch.Tensor, y: torch.Tensor, learning_rate: float, plasticity: float):
+        """
+        Backward pass with genetic trait influence
+        Args:
+            x: Input tensor
+            y: Target tensor 
+            learning_rate: Base learning rate modified by genetics
+            plasticity: Neural plasticity from genetics
+        """
+        # Forward pass to get outputs and store activations
+        outputs, hidden_states = self.forward(x, self.state_manager.get_context())
         
-        self.zero_grad()
+        # Calculate loss with genetic influence
+        loss = self.criterion(outputs, y) * (1.0 + plasticity)
+        
+        # Zero existing gradients
+        self.optimizer.zero_grad()
+        
+        # Backward pass
         loss.backward()
         
-        with torch.no_grad():
-            for module in self.modules():
-                if isinstance(module, nn.Linear) and module.weight.grad is not None:
-                    module.weight -= module.weight.grad * learning_rate * plasticity
-                    if module.bias is not None and module.bias.grad is not None:
-                        module.bias -= module.bias.grad * learning_rate * plasticity
+        # Apply genetic traits to gradient updates
+        for param in self.parameters():
+            if param.grad is not None:
+                # Scale gradients by plasticity and learning rate
+                param.grad *= plasticity
+                param.grad *= learning_rate
+                
+                # Apply adaptive noise based on plasticity
+                noise_scale = 0.01 * plasticity
+                param.grad += torch.randn_like(param.grad) * noise_scale
+        
+        # Update weights
+        self.optimizer.step()
+        
+        # Update memory cells with new learning
+        self.state_manager.update_memory(hidden_states, loss.item())
+        
+        return loss.item()
 
     def process_dream(self, experience: Dict):
         """Process experiences during dream state for memory consolidation"""
@@ -292,6 +362,47 @@ class NeuralAdaptiveNetwork(nn.Module):
         
         # Reset states for new configuration
         self.reset_states()
+
+    def _calculate_network_architecture(self, genetic_core):
+        """Calculate network architecture based on genetic parameters"""
+        return {
+            'input_size': 64,  # Base input size
+            'output_size': 32,  # Base output size
+            'memory_size': int(64 * genetic_core.brain_genetics.memory_capacity)  # Dynamic memory size
+        }
+    def _create_neural_network(self, genetic_core: GeneticCore) -> 'NeuralAdaptiveNetwork':
+        """Create neural network with genetic parameters"""
+        try:
+            # Get network architecture
+            architecture = self._calculate_network_architecture(genetic_core)
+            # Get network dimensions from the genetic core's traits 
+            input_layer_scale = genetic_core.brain_genetics.processing_power
+            output_layer_scale = genetic_core.brain_genetics.pattern_recognition
+
+            architecture = {
+                'input_size': int(32 * max(1.0, input_layer_scale)),  # Dynamic input scaling
+                'output_size': int(16 * max(1.0, output_layer_scale)), # Dynamic output scaling
+                'memory_size': int(64 * genetic_core.brain_genetics.memory_capacity)  # Dynamic memory size
+            }            
+            # Debug logging
+            logger.debug(f"Network architecture: {architecture}")
+            logger.debug(f"Using brain genetics: {vars(genetic_core.brain_genetics)}")
+            
+            # Initialize network attributes using self
+            self.input_size = architecture['input_size']
+            self.output_size = architecture['output_size'] 
+            self.memory_size = architecture['memory_size']
+            self.learning_rate = genetic_core.brain_genetics.learning_rate
+            self.plasticity = genetic_core.brain_genetics.neural_plasticity
+            
+            return self
+        except Exception as e:
+            logger.error(f"Neural network creation failed: {str(e)}", exc_info=True)
+            raise
+
+    def adapt_to_genetics(self, genetic_core: BaseGeneticCore):
+        # Implementation
+        pass
 
 
 class NeuralLayer(nn.Module):

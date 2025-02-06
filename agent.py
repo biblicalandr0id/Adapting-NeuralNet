@@ -256,6 +256,40 @@ class AdaptiveDataAugmenter:
         }
 
 
+class ActionMutation:
+    """Handles mutation of action behaviors and parameters"""
+    def __init__(self, genetic_core: GeneticCore):
+        self.genetic_core = genetic_core
+        self.mutation_history = []
+        
+    def mutate_action(self, action_func: callable, mutation_strength: float) -> callable:
+        """Create mutated version of action function"""
+        creativity = self.genetic_core.mind_genetics.creativity
+        adaptability = self.genetic_core.mind_genetics.adaptation_rate
+        intelligence = self.genetic_core.brain_genetics.processing_speed
+        
+        def mutated_action(params: Dict, success: bool, env_state: EnvironmentalState) -> float:
+            # Base result from original action
+            base_result = action_func(params, success, env_state)
+            
+            # Mutation influences
+            behavioral_shift = random.gauss(0, creativity * mutation_strength)
+            efficiency_modifier = 1.0 + (intelligence * mutation_strength * 0.2)
+            adaptation_bonus = adaptability * mutation_strength * 0.1
+            
+            # Apply mutations
+            mutated_result = (base_result * efficiency_modifier) + behavioral_shift
+            
+            # Adaptation effects
+            if env_state and hasattr(env_state, 'difficulty'):
+                adaptation_effect = adaptation_bonus * env_state.difficulty
+                mutated_result *= (1.0 + adaptation_effect)
+            
+            return float(mutated_result)
+            
+        return mutated_action
+
+
 class AdaptiveAgent:
     def __init__(self, genetic_core: GeneticCore, neural_net: NeuralAdaptiveNetwork, 
                  position: Tuple[float, float], gender: Optional[str] = None,
@@ -332,6 +366,12 @@ class AdaptiveAgent:
             self._initialize_evolution_capability()
         self.is_predator = is_predator
         self.hunting_stats = {} if is_predator else None
+        self.action_mutator = ActionMutation(genetic_core)
+        self.mutation_stats = {
+            'successful_mutations': 0,
+            'failed_mutations': 0,
+            'mutation_effects': []
+        }
 
     def augment_perception(self, inputs, context=None):
         return self.data_augmenter.augment(inputs, context)
@@ -1443,6 +1483,79 @@ class AdaptiveAgent:
         for experience in dream_experiences:
             self.neural_net.process_dream(experience)
             self.energy -= 0.1
+
+    def update(self, env_state: EnvironmentalState) -> bool:
+        # Apply emergent trait effects
+        self.genetic_core.apply_emergent_traits()
+        
+        # Evolve traits based on usage
+        for trait in self.genetic_core.emergent_traits.values():
+            # Increase stability with successful use
+            if self.evolution_stats['successful_mutations'] > 0:
+                trait.stability = min(1.0, trait.stability + 0.01)
+            
+            # Potentially generate new trait combinations
+            if (trait.stability > 0.8 and 
+                random.random() < self.genetic_core.mind_genetics.creativity * 0.1):
+                new_trait = self.genetic_core._generate_emergent_trait()
+                if new_trait:
+                    self.genetic_core.emergent_traits[new_trait.name] = new_trait
+                    self.lineage.mutations.append({
+                        'type': 'emergent_trait',
+                        'name': new_trait.name,
+                        'age': self.age
+                    })
+
+        if self.is_predator:
+            return self._update_predator(env_state)
+        return self._update_prey(env_state)
+
+    def _move_action(self, params: Dict, success: bool, env_state: EnvironmentalState) -> float:
+        """Mutable movement action controlled by agent's genetics"""
+        if not success:
+            return -0.1 * self.genetic_core.mind_genetics.risk_tolerance
+            
+        # Genetic influences
+        efficiency = self.genetic_core.physical_genetics.energy_efficiency
+        precision = self.genetic_core.physical_genetics.action_precision
+        adaptation = self.genetic_core.mind_genetics.adaptation_rate
+        
+        # Movement parameters modified by genetics
+        direction = params.get('direction', np.random.rand(2) - 0.5)
+        base_speed = params.get('speed', 1.0)
+        speed = base_speed * precision * adaptation
+        energy_cost = 0.1 * speed / efficiency
+        
+        # Execute movement
+        new_position = (
+            self.position[0] + direction[0] * speed,
+            self.position[1] + direction[1] * speed
+        )
+        self.position = new_position
+        self.energy -= energy_cost
+        
+        return 0.05 * efficiency  # Reward scaled by efficiency
+
+    def _gather_action(self, params: Dict, success: bool, env_state: EnvironmentalState) -> float:
+        """Mutable gathering action influenced by genetics"""
+        # Similar genetic-influenced implementation...
+
+    def _process_action(self, params: Dict, success: bool, env_state: EnvironmentalState) -> float:
+        """Mutable processing action influenced by genetics"""
+        # Similar genetic-influenced implementation...
+
+    def mutate_action(self, action_name: str, mutation_rate: float = None) -> None:
+        """Mutate an existing action based on genetic traits"""
+        if mutation_rate is None:
+            mutation_rate = self.genetic_core.mind_genetics.creativity * 0.1
+            
+        if action_name in self.actions:
+            current_prototype = self.action_decoder.action_prototypes[action_name]
+            mutation = torch.randn_like(current_prototype) * mutation_rate
+            new_prototype = current_prototype + mutation
+            
+            # Update action prototype
+            self.action_decoder.action_prototypes[action_name] = new_prototype
 
 
 class SimulationDebugger:

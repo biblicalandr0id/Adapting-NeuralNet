@@ -7,10 +7,10 @@ import json
 import random
 import logging
 import torch
-from .genetic_inheritance import DigitalNucleotide, GeneticTrait
-
-# Remove direct torchvision import
-# Instead, use torch.nn.functional for any needed operations
+from genetic_inheritance import DigitalNucleotide, GeneticTrait
+import uuid
+import datetime
+import os
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -29,18 +29,54 @@ class BaseTraits:
 @dataclass
 class MindGenetics:
     # Basic mental attributes
-    creativity: float = 1.0
+    creativity: float = 1.0  # Added
     learning_efficiency: float = 1.0
     adaptation_rate: float = 1.0
     memory_retention: float = 1.0
+    memory_capacity: float = 1.0
     problem_solving: float = 1.0
-    
+    strategic_thinking: float = 0.6
+
     # Advanced mental traits
     risk_assessment: float = 0.5
     social_awareness: float = 0.5
     innovation_drive: float = 0.7
     curiosity_factor: float = 0.8
-    strategic_thinking: float = 0.6
+
+    # Make sure we initialize this in GeneticCore
+    mutation_history: List[str] = field(default_factory=list)
+    adaptation_score: float = 1.0
+
+    def calculate_creativity(self) -> float:
+        """Calculate creativity with innovation bonus"""
+        base_creativity = self.creativity
+        innovation_bonus = self.innovation_drive * 0.3
+        curiosity_bonus = self.curiosity_factor * 0.2
+        return base_creativity * (1 + innovation_bonus + curiosity_bonus)
+
+    def calculate_learning_capacity(self) -> float:
+        """Calculate learning capacity with efficiency bonus"""
+        base_capacity = self.learning_efficiency
+        retention_bonus = self.memory_retention * 0.25
+        return base_capacity * (1 + retention_bonus)
+
+    def calculate_decision_making(self) -> float:
+        """Calculate decision making with risk assessment"""
+        base_decision = self.strategic_thinking
+        risk_bonus = self.risk_assessment * 0.2
+        return base_decision * (1 + risk_bonus)
+
+    def calculate_adaptation_rate(self) -> float:
+        """Calculate adaptation rate with awareness bonus"""
+        base_rate = self.adaptation_rate
+        awareness_bonus = self.social_awareness * 0.15
+        return base_rate * (1 + awareness_bonus)
+
+    def calculate_memory_capacity(self) -> float:
+        """Calculate memory capacity with retention bonus"""
+        base_capacity = self.memory_capacity
+        retention_bonus = self.memory_retention * 0.2
+        return base_capacity * (1 + retention_bonus)
 
 
 @dataclass
@@ -56,28 +92,90 @@ class HeartGenetics:
     security_sensitivity: float = 1.0  # How strongly agent responds to threats
 
 
+@dataclass
 class BrainGenetics:
-    def __init__(self):
-        """Initialize brain-related genetic traits"""
-        # Change from random.uniform to float type hints
-        self.processing_speed: float = random.uniform(0.1, 1.0)
-        self.pattern_recognition: float = random.uniform(0.1, 1.0)
-        self.neural_plasticity: float = random.uniform(0.2, 0.8)
-        self.learning_rate: float = random.uniform(0.01, 0.1)
-        self.memory_capacity: float = random.uniform(0.3, 1.0)
-        
+    # Base attributes
+    processing_speed: float = 1.0
+    pattern_recognition: float = 1.0
+    neural_plasticity: float = 0.5
+    learning_rate: float = 0.05
+    memory_capacity: float = 0.7
+    decision_speed: float = 1.0  # Added missing attribute
+    multi_tasking: float = 1.0   # Added missing attribute
+    spatial_awareness: float = 1.0  # Added missing attribute
+    temporal_processing: float = 1.0  # Added missing attribute
+    error_correction: float = 1.0  # Added missing attribute
+    
+    # Track mutations and adaptations
+    mutation_history: List[str] = field(default_factory=list)
+    adaptation_score: float = 1.0
+
     def mutate(self) -> 'BrainGenetics':
-        """Create a mutated copy of brain genetics"""
+        """Create a mutated copy with tracking"""
         mutated = BrainGenetics()
-        mutation_strength: float = random.uniform(0.8, 1.2)
+        mutation_strength = random.uniform(0.8, 1.2)
+        mutations = []
         
-        mutated.processing_speed = max(0.1, min(1.0, self.processing_speed * mutation_strength))
-        mutated.pattern_recognition = max(0.1, min(1.0, self.pattern_recognition * mutation_strength))
-        mutated.neural_plasticity = max(0.2, min(0.8, self.neural_plasticity * mutation_strength))
-        mutated.learning_rate = max(0.01, min(0.1, self.learning_rate * mutation_strength))
-        mutated.memory_capacity = max(0.3, min(1.0, self.memory_capacity * mutation_strength))
+        # Apply mutations with tracking
+        for field in self.__annotations__:
+            if field not in ['mutation_history', 'adaptation_score']:
+                old_value = getattr(self, field)
+                new_value = max(0.1, min(1.0, old_value * mutation_strength))
+                setattr(mutated, field, new_value)
+                
+                if abs(new_value - old_value) > 0.1:
+                    mutations.append(f"{field}: {old_value:.2f} -> {new_value:.2f}")
         
+        mutated.mutation_history = self.mutation_history + mutations
         return mutated
+    
+    def inherit_from(self, parent: 'BrainGenetics', strength: float = 0.7) -> None:
+        """Inherit traits from parent with variable strength"""
+        for field in self.__annotations__:
+            if field not in ['mutation_history', 'adaptation_score']:
+                parent_value = getattr(parent, field)
+                current_value = getattr(self, field)
+                inherited = (parent_value * strength) + (current_value * (1 - strength))
+                setattr(self, field, inherited)
+
+    def calculate_performance_metrics(self) -> Dict[str, float]:
+        """Calculate overall brain performance metrics"""
+        return {
+            'processing_efficiency': self.calculate_processing_power() * self.calculate_pattern_recognition(),
+            'learning_potential': self.calculate_plasticity() * self.calculate_learning_rate(),
+            'memory_effectiveness': self.calculate_memory_capacity() * self.pattern_recognition,
+            'adaptation_capability': self.neural_plasticity * self.learning_rate
+        }
+
+    def calculate_plasticity(self) -> float:
+        """Calculate neural plasticity with learning bonus"""
+        base_plasticity = self.neural_plasticity
+        learning_bonus = self.learning_rate * 0.2
+        return base_plasticity * (1 + learning_bonus)
+
+    def calculate_learning_rate(self) -> float:
+        """Calculate learning rate with plasticity bonus"""
+        base_rate = self.learning_rate
+        plasticity_bonus = self.neural_plasticity * 0.1
+        return base_rate * (1 + plasticity_bonus)
+
+    def calculate_memory_capacity(self) -> float:
+        """Calculate memory capacity with recognition bonus"""
+        base_capacity = self.memory_capacity
+        recognition_bonus = self.pattern_recognition * 0.15
+        return base_capacity * (1 + recognition_bonus)
+
+    def calculate_processing_power(self) -> float:
+        """Calculate processing power with speed bonus"""
+        base_power = self.processing_speed
+        recognition_bonus = self.pattern_recognition * 0.25
+        return base_power * (1 + recognition_bonus)
+
+    def calculate_pattern_recognition(self) -> float:
+        """Calculate pattern recognition with efficiency bonus"""
+        base_recognition = self.pattern_recognition
+        efficiency_bonus = self.processing_speed * 0.15
+        return base_recognition * (1 + efficiency_bonus)
 
 
 @dataclass
@@ -96,6 +194,53 @@ class PhysicalGenetics:
     longevity_factor: float = 1.0
     adaptation_speed: float = 0.5
 
+    def calculate_metabolism(self) -> float:
+        """Calculate metabolism rate with efficiency bonus"""
+        base_rate = self.metabolic_rate
+        efficiency_bonus = self.energy_efficiency * 0.2
+        return base_rate * (1 + efficiency_bonus)
+    
+    def calculate_efficiency(self) -> float:
+        """Calculate energy efficiency with size penalty"""
+        base_efficiency = self.energy_efficiency
+        size_penalty = max(0, (self.size - 1.0) * 0.1)
+        return base_efficiency * (1 - size_penalty)
+    
+    def calculate_stamina(self) -> float:
+        """Calculate stamina with metabolism and strength"""
+        base_stamina = (self.strength + self.metabolic_rate) / 2
+        efficiency_bonus = self.energy_efficiency * 0.15
+        return base_stamina * (1 + efficiency_bonus)
+    
+    def calculate_adaptation_rate(self) -> float:
+        """Calculate physical adaptation rate"""
+        base_rate = self.adaptation_speed
+        regen_bonus = self.regeneration_rate * 0.1
+        immune_bonus = self.immune_system * 0.1
+        return base_rate * (1 + regen_bonus + immune_bonus)
+
+
+@dataclass
+class EmbryoGenetics:
+    """Genetics for embryonic development and inheritance"""
+    development_rate: float = 1.0
+    mutation_chance: float = 0.05
+    inheritance_factor: float = 0.7
+    trait_stability: float = 0.8
+    development_plasticity: float = 0.6
+    
+    def calculate_mutation_rate(self) -> float:
+        return self.mutation_chance * (1 - self.trait_stability)
+        
+    def calculate_inheritance(self) -> float:
+        return self.inheritance_factor * self.trait_stability
+        
+    def calculate_development_speed(self) -> float:
+        return self.development_rate * self.development_plasticity
+        
+    def calculate_trait_stability(self) -> float:
+        return self.trait_stability * (1 + self.inheritance_factor * 0.2)
+
 
 def create_genetic_core(seed: Optional[int] = None) -> 'GeneticCore':
     """Factory function to create and initialize genetic core"""
@@ -104,32 +249,90 @@ def create_genetic_core(seed: Optional[int] = None) -> 'GeneticCore':
     return genetics
 
 
+class EmergentTrait:
+    def __init__(self, name: str, value: float, influence_map: Dict[str, float]):
+        self.name = name
+        self.value = value
+        self.influence_map = influence_map  # How this trait affects others
+        self.generation_discovered = 0
+        self.stability = 0.5  # How stable this trait is
+
 class GeneticCore:
-    def __init__(self, parent_genes: Dict = None):
-        """Initialize genetic core with optional parent genes"""
-        self.base_traits = BaseTraits()
-        self.mind_genetics = MindGenetics()
+    def __init__(self):
+        # Add validation
         self.brain_genetics = BrainGenetics()
+        self.mind_genetics = MindGenetics()
         self.physical_genetics = PhysicalGenetics()
-        self.heart_genetics = HeartGenetics()
-        self.generation = 0
-        self.mutations = []
-        self.gene_variance = 0.1
-        self.mutation_rate = 0.1
-        self.trait_dependencies = self._setup_trait_dependencies()
-        self.development_progress = 0.0
-        self.stages = {
-            'embryo': (0.0, 0.2),
-            'infant': (0.2, 0.4),
-            'juvenile': (0.4, 0.6),
-            'adolescent': (0.6, 0.8),
-            'adult': (0.8, 1.0)
+        self.embryo_genetics = EmbryoGenetics(
+            growth_rate=random.uniform(0.8, 1.2),
+            differentiation_rate=random.uniform(0.8, 1.2),
+            plasticity=random.uniform(0.8, 1.2),
+            stability=random.uniform(0.8, 1.2)
+        )
+        
+        # Validate initialization
+        self._validate_genetics()
+        
+        # Initialize traits
+        self.traits = self._initialize_traits()
+        self.emergent_traits: Dict[str, EmergentTrait] = {}
+        self.trait_mutation_chance = 0.05
+        
+    def _validate_genetics(self):
+        """Validate all genetics are properly initialized"""
+        if not hasattr(self.mind_genetics, 'creativity'):
+            logger.error("Mind genetics missing creativity trait")
+            raise ValueError("Mind genetics initialization failed")
+            
+        if not hasattr(self.brain_genetics, 'pattern_recognition'):
+            logger.error("Brain genetics missing pattern recognition trait")
+            raise ValueError("Brain genetics initialization failed")
+
+    def _initialize_traits(self):
+        return {
+            'neural': self._calculate_neural_traits(),
+            'processing': self._calculate_processing_traits(), 
+            'physical': self._calculate_physical_traits(),
+            'development': self._calculate_development_traits()
+        }
+    
+    def _calculate_neural_traits(self) -> Dict:
+        """Calculate neural network traits from genetics"""
+        return {
+            'plasticity': self.brain_genetics.calculate_plasticity(),
+            'learning_rate': self.brain_genetics.calculate_learning_rate(),
+            'memory_capacity': self.brain_genetics.calculate_memory_capacity(),
+            'processing_power': self.brain_genetics.calculate_processing_power()
         }
 
-        if parent_genes:
-            self._inherit_from_parent(parent_genes)
-        else:
-            self._initialize_random_genes()
+    def _calculate_processing_traits(self) -> Dict:
+        """Calculate mental processing traits from genetics"""
+        return {
+            'creativity': self.mind_genetics.calculate_creativity(),
+            'learning_capacity': self.mind_genetics.calculate_learning_capacity(),
+            'decision_making': self.mind_genetics.calculate_decision_making(),
+            'pattern_recognition': self.brain_genetics.calculate_pattern_recognition(),  # From brain not mind
+            'problem_solving': self.mind_genetics.problem_solving,
+            'memory_retention': self.mind_genetics.memory_retention
+        }
+
+    def _calculate_physical_traits(self) -> Dict:
+        """Calculate physical traits from genetics"""
+        return {
+            'metabolism_rate': self.physical_genetics.calculate_metabolism(),
+            'energy_efficiency': self.physical_genetics.calculate_efficiency(),
+            'stamina': self.physical_genetics.calculate_stamina(),
+            'adaptation_rate': self.physical_genetics.calculate_adaptation_rate()
+        }
+
+    def _calculate_development_traits(self) -> Dict:
+        """Calculate development and inheritance traits"""
+        return {
+            'mutation_rate': self.embryo_genetics.calculate_mutation_rate(),
+            'inheritance_strength': self.embryo_genetics.calculate_inheritance(),
+            'development_speed': self.embryo_genetics.calculate_development_speed(),
+            'trait_stability': self.embryo_genetics.calculate_trait_stability()
+        }
 
     def initialize_random_genetics(self, seed: Optional[int] = None) -> None:
         if seed is not None:
@@ -197,26 +400,16 @@ class GeneticCore:
 
     def _initialize_brain_genetics(self) -> None:
         self.brain_genetics = BrainGenetics(
-            processing_speed=self.base_traits.efficiency *
-            np.random.normal(1.0, 0.1),
-            memory_capacity=self.base_traits.stability *
-            np.random.normal(1.0, 0.1),
-            pattern_recognition=self.base_traits.complexity *
-            np.random.normal(1.0, 0.1),
-            learning_rate=self.base_traits.adaptability *
-            np.random.normal(1.0, 0.1),
-            neural_plasticity=self.base_traits.stability *
-            np.random.normal(1.0, 0.1),
-            decision_speed=self.base_traits.efficiency *
-            np.random.normal(1.0, 0.1),
-            multi_tasking=self.base_traits.complexity *
-            np.random.normal(1.0, 0.1),
-            spatial_awareness=self.base_traits.adaptability *
-            np.random.normal(1.0, 0.1),
-            temporal_processing=self.base_traits.stability *
-            np.random.normal(1.0, 0.1),
-            error_correction=self.base_traits.resilience *
-            np.random.normal(1.0, 0.1)
+            processing_speed=self.base_traits.efficiency * np.random.normal(1.0, 0.1),
+            pattern_recognition=self.base_traits.complexity * np.random.normal(1.0, 0.1),
+            neural_plasticity=self.base_traits.stability * np.random.normal(1.0, 0.1),
+            learning_rate=self.base_traits.adaptability * np.random.normal(1.0, 0.1),
+            memory_capacity=self.base_traits.stability * np.random.normal(1.0, 0.1),
+            decision_speed=self.base_traits.efficiency * np.random.normal(1.0, 0.1),
+            multi_tasking=self.base_traits.complexity * np.random.normal(1.0, 0.1),
+            spatial_awareness=self.base_traits.adaptability * np.random.normal(1.0, 0.1),
+            temporal_processing=self.base_traits.stability * np.random.normal(1.0, 0.1),
+            error_correction=self.base_traits.resilience * np.random.normal(1.0, 0.1)
         )
 
     def _initialize_physical_genetics(self) -> None:
@@ -437,7 +630,66 @@ class GeneticCore:
                     mutations.append(f"{field}: {old_value:.2f} -> {new_value:.2f}")
         
         self.mutations.extend(mutations)
+        
+        # Emergent trait mutation
+        if random.random() < self.trait_mutation_chance:
+            new_trait = self._generate_emergent_trait()
+            if new_trait:
+                self.emergent_traits[new_trait.name] = new_trait
+                mutations.append(f"Developed new trait: {new_trait.name}")
+        
         return mutations
+
+    def _generate_emergent_trait(self) -> Optional[EmergentTrait]:
+        """Generate a completely new trait based on existing traits"""
+        base_traits = {
+            'creativity': self.mind_genetics.creativity,
+            'processing_speed': self.brain_genetics.processing_speed,
+            'energy_efficiency': self.physical_genetics.energy_efficiency,
+            'neural_plasticity': self.brain_genetics.neural_plasticity
+        }
+        
+        # Generate new trait name using combinations of existing traits
+        trait_aspects = [
+            ['hyper', 'meta', 'quantum', 'parallel'],
+            ['processing', 'adaptation', 'synthesis', 'cognition'],
+            ['resonance', 'alignment', 'coherence', 'integration']
+        ]
+        
+        new_name = "_".join([random.choice(aspect) for aspect in trait_aspects])
+        
+        # Create influence map - how this trait affects others
+        influence_map = {}
+        for trait, value in base_traits.items():
+            if random.random() < 0.3:  # 30% chance to influence each trait
+                influence_map[trait] = random.uniform(-0.5, 0.5)
+        
+        # Initial value based on parent traits
+        initial_value = sum(base_traits.values()) / len(base_traits)
+        initial_value *= random.uniform(0.8, 1.2)  # Add some randomness
+        
+        return EmergentTrait(
+            name=new_name,
+            value=initial_value,
+            influence_map=influence_map
+        )
+
+    def apply_emergent_traits(self):
+        """Apply effects of emergent traits to base traits"""
+        for trait in self.emergent_traits.values():
+            for target_trait, influence in trait.influence_map.items():
+                # Apply influence based on the trait's stability
+                effect = influence * trait.value * trait.stability
+                
+                if hasattr(self.mind_genetics, target_trait):
+                    current = getattr(self.mind_genetics, target_trait)
+                    setattr(self.mind_genetics, target_trait, current + effect)
+                elif hasattr(self.brain_genetics, target_trait):
+                    current = getattr(self.brain_genetics, target_trait)
+                    setattr(self.brain_genetics, target_trait, current + effect)
+                elif hasattr(self.physical_genetics, target_trait):
+                    current = getattr(self.physical_genetics, target_trait)
+                    setattr(self.physical_genetics, target_trait, current + effect)
 
     def combine_genes(self, other_core: 'GeneticCore') -> 'GeneticCore':
         """Combine genes using digital DNA inheritance system"""
@@ -485,7 +737,7 @@ class GeneticCore:
             },
             "dna_sequences": {},
             "generation": offspring.generation,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.datetime.now().isoformat()
         }
         
         # Record the event
@@ -550,8 +802,57 @@ class GeneticCore:
                 traits.append((f"{class_name}.{field}", float(value)))
         return traits
 
+    def create_offspring(self) -> 'GeneticCore':
+        """Create a new genetic core with mutations"""
+        offspring = GeneticCore()
+        
+        # Inherit and mutate embryo genetics
+        for field in offspring.embryo_genetics.__dataclass_fields__:
+            parent_value = getattr(self.embryo_genetics, field)
+            mutation = random.uniform(-0.1, 0.1)
+            new_value = max(0.1, min(2.0, parent_value + mutation))
+            setattr(offspring.embryo_genetics, field, new_value)
+            
+        # Inherit other genetics similarly...
+        return offspring
 
-def create_offspring(parent1: GeneticCore, parent2: GeneticCore) -> GeneticCore:
+    def get_all_traits(self) -> Dict:
+        """Get all genetic traits as a dictionary"""
+        return {
+            'embryo': {
+                field: getattr(self.embryo_genetics, field)
+                for field in self.embryo_genetics.__dataclass_fields__
+            },
+            'mind': {
+                field: getattr(self.mind_genetics, field)
+                for field in self.mind_genetics.__dataclass_fields__
+            },
+            'brain': {
+                field: getattr(self.brain_genetics, field)
+                for field in self.brain_genetics.__dataclass_fields__
+            },
+            'heart': {
+                field: getattr(self.heart_genetics, field)
+                for field in self.heart_genetics.__dataclass_fields__
+            }
+        }
+
+    def calculate_potential(self) -> float:
+        """Calculate overall genetic potential"""
+        potentials = {
+            'embryo': sum(getattr(self.embryo_genetics, f) 
+                         for f in self.embryo_genetics.__dataclass_fields__),
+            'mind': sum(getattr(self.mind_genetics, f) 
+                       for f in self.mind_genetics.__dataclass_fields__),
+            'brain': sum(getattr(self.brain_genetics, f) 
+                        for f in self.brain_genetics.__dataclass_fields__),
+            'heart': sum(getattr(self.heart_genetics, f) 
+                        for f in self.heart_genetics.__dataclass_fields__)
+        }
+        return sum(potentials.values()) / len(potentials)
+
+
+def create_offspring(parent1: 'GeneticCore', parent2: 'GeneticCore') -> 'GeneticCore':
     """Convenience function to create offspring from two parents"""
     # Verify parents are valid
     if not isinstance(parent1, GeneticCore) or not isinstance(parent2, GeneticCore):
@@ -565,3 +866,4 @@ def create_offspring(parent1: GeneticCore, parent2: GeneticCore) -> GeneticCore:
         offspring.mutate()  # Use existing mutation system
     
     return offspring
+pass

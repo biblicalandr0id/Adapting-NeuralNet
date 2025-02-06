@@ -9,7 +9,7 @@ import random
 import torch
 import logging
 import pyperclip  # For copy-paste functionality
-from .brain import Brain, BrainState
+from brain import Brain, BrainState
 
 class BrainCore:
     def __init__(self):

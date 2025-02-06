@@ -146,7 +146,7 @@ class HeartSecurity:
         # Remove all component files
         for path in self.component_paths.values():
             try:
-                if os.path.exists(path)):
+                if os.path.exists(path):
                     secure_delete(path)
             except Exception as e:
                 logging.error(f"Error during self-destruct: {e}")

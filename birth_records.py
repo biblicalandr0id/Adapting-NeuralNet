@@ -5,145 +5,107 @@ import json
 import os
 import uuid
 import logging
-from agent import AdaptiveAgent
+
 logger = logging.getLogger(__name__)
 
 @dataclass
 class BirthRecord:
-    """Records the birth details of an agent"""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = ""
-    gender: str = ""
-    birth_time: datetime = field(default_factory=datetime.now)
-    parent_ids: Dict[str, str] = field(default_factory=dict)
-    genetic_traits: Dict = field(default_factory=dict)
-    generation: int = 1
-    birth_location: Tuple[float, float] = field(default_factory=lambda: (0.0, 0.0))
-    species_type: str = "agent"  # Can be "agent" or "predator"
-    
+    """Record of an agent's birth details"""
+    id: str
+    timestamp: datetime
+    genetic_traits: Dict
+    parent_id: Optional[str]
+    position: tuple[float, float]
+    gender: str
+    metadata: Optional[Dict] = None
+
     def to_dict(self) -> Dict:
         """Convert birth record to dictionary format"""
         return {
             'id': self.id,
-            'name': self.name,
-            'gender': self.gender,
-            'birth_time': self.birth_time.isoformat(),
-            'parent_ids': self.parent_ids,
+            'timestamp': self.timestamp.isoformat(),
             'genetic_traits': self.genetic_traits,
-            'generation': self.generation,
-            'birth_location': self.birth_location,
-            'species_type': self.species_type
+            'parent_id': self.parent_id,
+            'position': self.position,
+            'gender': self.gender,
+            'metadata': self.metadata or {}
         }
 
 class BirthRegistry:
-    """Manages birth records for the simulation"""
-    def __init__(self, registry_dir: str = 'birth_records'):
-        self.registry_dir = registry_dir
+    """Manages birth records for all agents"""
+    
+    def __init__(self, save_dir: str = 'birth_records'):
+        self.save_dir = save_dir
         self.records: Dict[str, BirthRecord] = {}
-        self._ensure_directory()
-    
-    def _ensure_directory(self):
-        """Create registry directory if it doesn't exist"""
-        if not os.path.exists(self.registry_dir):
-            os.makedirs(self.registry_dir)
-            logger.info(f"Created birth registry directory: {self.registry_dir}")
-    
-    def register_birth(self, record: BirthRecord) -> bool:
-        """Register a new birth record"""
-        try:
-            # Store in memory
-            self.records[record.id] = record
-            
-            # Save to file
-            date_dir = os.path.join(
-                self.registry_dir,
-                record.birth_time.strftime('%Y%m%d')
-            )
-            os.makedirs(date_dir, exist_ok=True)
-            
-            filepath = os.path.join(date_dir, f"{record.id}.json")
-            with open(filepath, 'w') as f:
-                json.dump(record.to_dict(), f, indent=2)
-            
-            logger.info(f"Registered birth: {record.name} ({record.id})")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to register birth: {str(e)}")
-            return False
-    
-    def get_record(self, record_id: str) -> Optional[BirthRecord]:
-        """Retrieve a birth record by ID"""
-        return self.records.get(record_id)
-    
-    def get_lineage(self, record_id: str) -> List[BirthRecord]:
-        """Get the complete lineage for a given record"""
-        lineage = []
-        current = self.get_record(record_id)
+        os.makedirs(save_dir, exist_ok=True)
         
-        while current:
-            lineage.append(current)
-            # Follow maternal line (can be modified to include paternal)
-            mother_id = current.parent_ids.get('mother')
-            current = self.get_record(mother_id) if mother_id else None
+    def register_birth(self, record: BirthRecord) -> None:
+        """Register a new birth record"""
+        self.records[record.id] = record
+        self._save_record(record)
+        
+    def get_record(self, agent_id: str) -> Optional[BirthRecord]:
+        """Retrieve a birth record by agent ID"""
+        return self.records.get(agent_id)
+        
+    def _save_record(self, record: BirthRecord) -> None:
+        """Save birth record to file"""
+        try:
+            filename = f"{self.save_dir}/{record.id}.json"
+            with open(filename, 'w') as f:
+                json.dump(record.to_dict(), f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save birth record: {str(e)}")
+            
+    def load_records(self) -> None:
+        """Load all birth records from files"""
+        try:
+            for filename in os.listdir(self.save_dir):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(self.save_dir, filename)
+                    with open(filepath, 'r') as f:
+                        data = json.load(f)
+                        record = BirthRecord(
+                            id=data['id'],
+                            timestamp=datetime.fromisoformat(data['timestamp']),
+                            genetic_traits=data['genetic_traits'],
+                            parent_id=data['parent_id'],
+                            position=tuple(data['position']),
+                            gender=data['gender'],
+                            metadata=data.get('metadata')
+                        )
+                        self.records[record.id] = record
+        except Exception as e:
+            logger.error(f"Failed to load birth records: {str(e)}")
+
+    def get_lineage(self, agent_id: str) -> list[BirthRecord]:
+        """Get the lineage chain for an agent"""
+        lineage = []
+        current_id = agent_id
+        
+        while current_id:
+            record = self.get_record(current_id)
+            if not record:
+                break
+            lineage.append(record)
+            current_id = record.parent_id
             
         return lineage
-    
+
     def get_generation_stats(self) -> Dict:
         """Get statistics about generations"""
-        stats = {}
+        stats = {
+            'total_births': len(self.records),
+            'generations': {},
+            'gender_ratio': {'male': 0, 'female': 0}
+        }
+        
         for record in self.records.values():
-            if record.generation not in stats:
-                stats[record.generation] = {
-                    'count': 0,
-                    'male_count': 0,
-                    'female_count': 0,
-                    'avg_genetic_fitness': 0.0
-                }
+            # Count generations
+            generation = len(self.get_lineage(record.id))
+            stats['generations'][generation] = stats['generations'].get(generation, 0) + 1
             
-            gen_stats = stats[record.generation]
-            gen_stats['count'] += 1
-            if record.gender == 'male':
-                gen_stats['male_count'] += 1
-            else:
-                gen_stats['female_count'] += 1
-                
+            # Track gender ratio
+            stats['gender_ratio'][record.gender] += 1
+            
         return stats
-    
-    def backup_records(self) -> bool:
-        """Create a backup of all birth records"""
-        try:
-            backup_dir = os.path.join(
-                self.registry_dir,
-                f'backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-            )
-            os.makedirs(backup_dir)
-            
-            for record in self.records.values():
-                filepath = os.path.join(backup_dir, f"{record.id}.json")
-                with open(filepath, 'w') as f:
-                    json.dump(record.to_dict(), f, indent=2)
-                    
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to backup records: {str(e)}")
-            return False
-
-# Example usage:
-birth_registry = BirthRegistry()
-
-# When creating a new agent
-birth_record = BirthRecord(
-    name="Agent_001",
-    gender="female",
-    parent_ids={'mother': 'mother_id', 'father': 'father_id'},
-    genetic_traits=agent.genetic_core.get_all_traits(),
-    birth_location=agent.position
-)
-
-# Register the birth
-birth_registry.register_birth(birth_record)
-
-# Later, get lineage information
-lineage = birth_registry.get_lineage(birth_record.id)

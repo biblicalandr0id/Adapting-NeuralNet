@@ -33,6 +33,8 @@ class AdaptivePredator(Predator):
         
         super().__init__(position=position)
         self.genetic_core = genetic_core
+        if parent:
+            self.genetic_core.inherit_from(parent.genetic_core)
         self.neural_net = neural_net
         self.age = 0
         self.max_age = int(100 * genetic_core.physical_genetics.longevity)

@@ -9,13 +9,17 @@ from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 from collections import defaultdict, deque
 import numpy as np
-
+import time
 from agent import AdaptiveAgent
 from genetics import GeneticCore
 from neural_networks import NeuralAdaptiveNetwork
 from adaptive_environment import AdaptiveEnvironment, ResourceType, Resource
-
+from visualizer import Visualizer
 import matplotlib.pyplot as plt
+from predator import AdaptivePredator
+from agent_assembly import AgentAssembler
+from birth_registry import BirthRegistry
+from embryo_generator import EmbryoGenerator
 
 # Setup logging
 logging.basicConfig(
@@ -86,7 +90,7 @@ class SimulationStats:
             os.makedirs('simulation_stats')
 
 class SimulationVisualizer:
-    def __init__(self, width: int = 800, height: int = 600):
+    def __init__(self, width: int = 800, height: int = 600, debug_mode: bool = False):
         """Initialize the simulation visualizer"""
         pygame.init()
         
@@ -139,6 +143,10 @@ class SimulationVisualizer:
             'active_resources': 0,
             'evolution_events': 0
         }
+        
+        self.debug_mode = debug_mode
+        self.screenshot_dir = "simulation_screenshots"
+        os.makedirs(self.screenshot_dir, exist_ok=True)
         
         logger.info("SimulationVisualizer initialized successfully")
 
@@ -477,6 +485,32 @@ class SimulationVisualizer:
                  int(agent.position[1] * CELL_SIZE) - 20)
             )
 
+    def take_screenshot(self, event_name: str = "") -> str:
+        """Take a screenshot of the current simulation state"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{self.screenshot_dir}/screenshot_{event_name}_{timestamp}.png"
+        
+        try:
+            pygame.image.save(self.screen, filename)
+            logger.info(f"Screenshot saved: {filename}")
+            return filename
+        except Exception as e:
+            logger.error(f"Failed to save screenshot: {e}")
+            return ""
+
+    def capture_important_event(self, event_name: str, event_data: dict = None):
+        """Capture important simulation events with screenshots"""
+        screenshot_path = self.take_screenshot(event_name)
+        
+        if event_data and self.debug_mode:
+            # Save additional event data
+            data_path = screenshot_path.replace('.png', '_data.json')
+            try:
+                with open(data_path, 'w') as f:
+                    json.dump(event_data, f, indent=2)
+            except Exception as e:
+                logger.error(f"Failed to save event data: {e}")
+
 def save_best_agents(agents):
     """Save best performing agents to file"""
     if not agents:
@@ -504,34 +538,30 @@ def calculate_network_architecture(genetic_core: GeneticCore) -> Dict[str, int]:
     """Calculate neural network architecture based on genetic traits"""
     # Sensor inputs based on physical genetics
     sensor_inputs = int(16 * (1 + genetic_core.physical_genetics.sensor_sensitivity))
+    
+    # Memory inputs based on brain capacity
     memory_inputs = int(8 * genetic_core.brain_genetics.memory_capacity)
     base_input = sensor_inputs + memory_inputs
     
-    # Neural plasticity influences network size and adaptability
-    plasticity_factor = genetic_core.brain_genetics.neural_plasticity
-    base_hidden = int(32 * (1 + plasticity_factor))
-    
-    # Output neurons for different action types and responses
+    # Output neurons based on brain and mind traits
     base_output = int(12 * (1 + genetic_core.mind_genetics.creativity))
     
     # Brain complexity affects overall network scaling
     brain_complexity = (
         genetic_core.brain_genetics.processing_speed * 0.3 +
-        genetic_core.brain_genetics.pattern_recognition * 0.3 +
-        genetic_core.mind_genetics.creativity * 0.2 +
-        genetic_core.mind_genetics.learning_efficiency * 0.2
-    ) * (1 + plasticity_factor * 0.5)
+        genetic_core.brain_genetics.pattern_recognition * 0.3 +  # Changed from mind_genetics to brain_genetics
+        genetic_core.brain_genetics.neural_plasticity * 0.2 +
+        genetic_core.brain_genetics.learning_rate * 0.2
+    )
     
-    # Dynamic scaling based on brain development
+    # Calculate scaling factors
     input_scaling = 1 + (brain_complexity * 0.5)
-    hidden_scaling = 1 + (brain_complexity * 0.7 * plasticity_factor)
     output_scaling = 1 + (brain_complexity * 0.3)
     
     return {
         'input_size': int(base_input * input_scaling),
-        'hidden_size': int(base_hidden * hidden_scaling),
         'output_size': int(base_output * output_scaling),
-        'memory_size': memory_inputs  # Added for recurrent connections
+        'memory_size': memory_inputs
     }
 
 class PopulationGenetics:
@@ -593,7 +623,7 @@ def run_simulation():
         # Ensure minimum resources in environment
         if len(env.current_state.resources) == 0:
             logger.info("Initializing environment with minimum resources...")
-            env.add_resources(5)  # Add at least 5 resources to start
+            env.add_resources(5)
 
         # Create initial agents
         agents = []
@@ -607,11 +637,8 @@ def run_simulation():
                 # Create neural network with genetic-based architecture
                 neural_net = NeuralAdaptiveNetwork(
                     input_size=network_params['input_size'],
-                    hidden_size=network_params['hidden_size'],
                     output_size=network_params['output_size'],
-                    memory_size=network_params['memory_size'],
-                    learning_rate=genetic_core.brain_genetics.learning_rate,
-                    plasticity=genetic_core.brain_genetics.neural_plasticity
+                    genetic_core=genetic_core  # Pass genetic_core instead of hidden_size
                 )
                 
                 position = (
@@ -718,31 +745,6 @@ if __name__ == "__main__":
         logger.critical(f"Application crashed: {str(e)}")
         sys.exit(1)
 
-# In your main simulation:
-visualizer = Visualizer(debug_mode=True)
-
-# Take screenshots at important moments
-if important_event:
-    visualizer.take_screenshot()
-
-from typing import List, Dict, Optional
-import logging
-import pygame
-import sys
-from datetime import datetime
-import os
-
-from .genetics import GeneticCore
-from .neural_networks import NeuralAdaptiveNetwork
-from .agent import AdaptiveAgent
-from .mind import Mind, GrowthMetrics, Memory
-from .brain import Brain, BrainState
-from .heart import HeartSystem
-from .adaptive_environment import AdaptiveEnvironment
-from .diagnostics import NeuralDiagnostics, AgentDiagnostics, PopulationDiagnostics
-from .visualizer import Visualizer
-from .birth_records import BirthRegistry
-from .embryo_generator import EmbryoGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -750,6 +752,7 @@ class SimulationManager:
     def __init__(self, config: Optional[Dict] = None):
         """Initialize simulation components"""
         self.config = config or self._default_config()
+        self.agent_assembler = AgentAssembler()
         
         # Initialize core systems
         self.birth_registry = BirthRegistry()
@@ -758,13 +761,6 @@ class SimulationManager:
             size=(self.config['env_width'], self.config['env_height']),
             complexity=self.config['env_complexity']
         )
-        
-        # Initialize diagnostics
-        self.diagnostics = {
-            'neural': NeuralDiagnostics(),
-            'agent': AgentDiagnostics(),
-            'population': PopulationDiagnostics()
-        }
         
         # Initialize visualization
         self.visualizer = Visualizer(
@@ -793,40 +789,15 @@ class SimulationManager:
             logger.info(f"Created agent: {agent.id}")
 
     def _create_agent(self, parent: Optional[AdaptiveAgent] = None) -> AdaptiveAgent:
-        """Create a new agent with all systems"""
-        # Generate genetic core
-        genetic_core = GeneticCore()
-        if parent:
-            genetic_core.inherit_from(parent.genetic_core)
-        
-        # Create neural network
-        neural_net = NeuralAdaptiveNetwork(
-            input_size=self.config['neural_input_size'],
-            output_size=self.config['neural_output_size'],
-            genetic_core=genetic_core
+        """Create a new agent using the assembler"""
+        position = (
+            random.randint(0, self.environment.size[0]),
+            random.randint(0, self.environment.size[1])
         )
         
-        # Create brain system
-        brain = Brain(genetic_core, neural_net)
-        
-        # Create heart system
-        heart = HeartSystem(genetic_core)
-        
-        # Create mind system
-        mind = Mind(brain, heart)
-        
-        # Create complete agent
-        agent = AdaptiveAgent(
-            genetic_core=genetic_core,
-            neural_net=neural_net,
-            position=(
-                random.randint(0, self.environment.size[0]),
-                random.randint(0, self.environment.size[1])
-            ),
-            birth_record=self.birth_registry.create_record()
-        )
-        
-        return agent
+        assembled = self.agent_assembler.create_agent(position, parent)
+        logger.info(f"Created agent with stats: {assembled.stats}")
+        return assembled.agent
 
     def run_simulation(self):
         """Main simulation loop"""
@@ -917,16 +888,89 @@ class SimulationManager:
 
     @staticmethod
     def _default_config() -> Dict:
-        """Default simulation configuration"""
+        """Default simulation configuration with full system parameters"""
         return {
+            # Environment settings
             'env_width': 800,
             'env_height': 600,
             'env_complexity': 0.5,
+            'resource_spawn_rate': 0.02,
+            'resource_max_quantity': 100,
+            'threat_probability': 0.01,
+            
+            # Display settings
             'display_width': 1024,
             'display_height': 768,
             'debug_mode': True,
+            'fps': 60,
+            
+            # Population settings
             'initial_population': 10,
+            'max_population': 100,
+            'min_reproduction_energy': 50,
+            'reproduction_cost': 30,
+            
+            # Neural network parameters
             'neural_input_size': 16,
             'neural_output_size': 8,
-            'fps': 60
+            'neural_plasticity': 0.3,
+            'learning_rate': 0.01,
+            'memory_capacity': 32,
+            
+            # Genetic parameters
+            'mutation_rate': 0.05,
+            'crossover_rate': 0.7,
+            'gene_complexity': 0.4,
+            
+            # Brain system settings
+            'brain_processing_power': 1.0,
+            'pattern_recognition_threshold': 0.6,
+            'neural_adaptation_rate': 0.2,
+            
+            # Heart system settings
+            'base_metabolism_rate': 1.0,
+            'energy_efficiency': 0.8,
+            'stamina_recovery_rate': 0.1,
+            
+            # Mind system settings
+            'creativity_factor': 0.5,
+            'learning_capacity': 0.7,
+            'decision_threshold': 0.3,
+            'memory_persistence': 0.8,
+            
+            # Embryo generation settings
+            'development_time': 100,
+            'inheritance_strength': 0.7,
+            'trait_mutation_chance': 0.1,
+            
+            # Birth registry settings
+            'lineage_tracking_depth': 5,
+            'heritage_influence': 0.4,
+            
+            # Diagnostic settings
+            'diagnostic_update_rate': 10,
+            'save_interval': 1000,
+            'performance_tracking': True,
+            
+            # Evolution settings
+            'adaptation_threshold': 0.6,
+            'innovation_requirement': 0.8,
+            'genetic_diversity_target': 0.7,
+            'selection_pressure': 0.5
         }
+
+    def initialize_display(self):
+        """Initialize pygame display with proper caption"""
+        try:
+            pygame.init()
+            self.screen = pygame.display.set_mode((
+                self.config['display_width'],
+                self.config['display_height']
+            ))
+            pygame.display.set_caption("Adaptive Simulation")  # Changed from setCaption
+            
+            logger.info(f"Display initialized: {self.config['display_width']}x{self.config['display_height']}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize display: {e}")
+            return False

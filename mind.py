@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 import time
 import torch
 import logging
-from .neural_networks import NeuralAdaptiveNetwork
-from .genetics import GeneticCore
+from neural_networks import NeuralAdaptiveNetwork
+from genetics import GeneticCore
 
 
 @dataclass
