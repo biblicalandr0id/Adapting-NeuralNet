@@ -1,11 +1,7 @@
-# adaptive_environment.py
-# Template for other modules
-# Standard library imports
 import os
 import sys
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
-from datetime import datetime
 import random
 import json
 import uuid
@@ -18,7 +14,6 @@ import pygame
 
 # Local application imports
 from genetics import GeneticCore
-from neural_networks import NeuralAdaptiveNetwork
 # ... other local imports as needed
 
 # Module logger
@@ -26,10 +21,13 @@ logger = logging.getLogger(__name__)
 
 from enum import Enum
 from typing import TYPE_CHECKING
-from predator import Predator  # Changed from relative import to absolute
 
 if TYPE_CHECKING:
     from agent import AdaptiveAgent
+    from predator import AdaptivePredator
+
+from environment_protocol import EnvironmentProtocol
+from predator import PredatorType, Predator, add_predator #Importing
 
 class ResourceType(Enum):  # From agent-architecture.py
     ENERGY = "energy"
@@ -39,7 +37,7 @@ class ResourceType(Enum):  # From agent-architecture.py
 
 @dataclass  # From agent-architecture.py
 class Resource:
-    type: str
+    type: ResourceType  # Changed from str to ResourceType enum
     quantity: float
     position: Tuple[float, float]
     complexity: float  # How difficult it is to extract/process
@@ -55,47 +53,111 @@ class Resource:
 class EnvironmentalState:
     """Represents the current state of the environment"""
     resources: List[Resource] = field(default_factory=list)
-    predators: List[Predator] = field(default_factory=list)
+    predators: List['AdaptivePredator'] = field(default_factory=list)
     time_step: int = 0
     complexity_level: float = 0.5
     agents: List['AdaptiveAgent'] = field(default_factory=list)
     size: Tuple[int, int] = (0, 0)
     weather_conditions: Dict = field(default_factory=dict)
 
-
-class PredatorType(Enum):
-    HUNTER = "hunter"      # Actively seeks agents
-    AMBUSHER = "ambusher" # Waits to ambush passing agents
-    SCAVENGER = "scavenger" # Follows from a distance, attacks weak agents
-
-@dataclass
-class Predator:
-    type: PredatorType
-    position: Tuple[float, float]
-    strength: float         # Attack power
-    speed: float           # Movement speed
-    perception: float      # Detection range
-    stamina: float         # Energy for pursuing
-    hunt_strategy: str     # Current behavioral state
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    def get_context_vector(self) -> torch.Tensor:
+        """Get environmental context as tensor for neural processing"""
+        context = [
+            self.complexity_level,
+            len(self.resources),
+            len(self.predators),
+            len(self.agents),
+            self.time_step / 1000.0,  # Normalize time
+            self.weather_conditions.get('temperature', 0.5),
+            self.weather_conditions.get('humidity', 0.5)
+        ]
+        return torch.tensor(context, dtype=torch.float32)
 
 
-class AdaptiveEnvironment:
+class AdaptiveEnvironment(EnvironmentProtocol): #Implementing the protocol
     def __init__(self, size: Tuple[int, int], complexity: float):
         self.size = size
         self.complexity = complexity
+        self.config = {
+            'max_resources': 100,
+            'resource_spawn_rate': 0.01 * complexity,
+            'predator_spawn_rate': 0.005 * complexity,
+            'resource_limit': int(50 * complexity),
+            'predator_limit': int(10 * complexity)
+        }
         self.current_state = EnvironmentalState(
             resources=[],
             predators=[],  # Now stores AdaptivePredator instances
             time_step=0,
             complexity_level=complexity,
-size=size
-)
+            size=size,
+            weather_conditions=self._initialize_weather()  # Initialize weather
+        )
 
     def step(self, agents: List['AdaptiveAgent']) -> EnvironmentalState:
         """Advance the environment by one time step"""
-        self._update_state()
-        return self.current_state
+        try:
+            self.current_state.time_step += 1
+            self.current_state.agents = agents
+
+            # Update resources with bounds checking
+            for resource in self.current_state.resources[:]:  # Copy list to allow modifications
+                if resource.quantity <= 0:
+                    self.current_state.resources.remove(resource)
+                    continue
+
+                # Calculate environmental factors
+                terrain_factor = max(0.1, min(2.0, self._get_terrain_factor(resource.position)))
+                weather_factor = max(0.1, min(2.0, self._get_weather_factor(resource.position)))
+                
+                # Update resource quantity with regeneration
+                if resource.quantity < resource.max_quantity:
+                    regen_rate = resource.regeneration_rate
+                    if resource.quantity < resource.depletion_threshold:
+                        regen_rate *= 1.5  # Faster regeneration when depleted
+                    
+                    resource.quantity = min(
+                        resource.max_quantity,
+                        resource.quantity + (regen_rate * terrain_factor * weather_factor)
+                    )
+
+            # Spawn new resources based on rate and current count
+            if (len(self.current_state.resources) < self.config['max_resources'] and 
+                random.random() < self.config['resource_spawn_rate']):
+                self.add_resources(1)
+
+            # Update predators with error handling
+            for predator in self.current_state.predators[:]:  # Copy list to allow modifications
+                try:
+                    movement = self._calculate_threat_movement(predator.position)
+                    terrain_gradient = self._calculate_terrain_gradient(predator.position)
+                    
+                    # Combine movement vectors with terrain influence
+                    final_movement = (
+                        movement[0] + terrain_gradient[0] * 0.3,
+                        movement[1] + terrain_gradient[1] * 0.3
+                    )
+                    
+                    # Update position with bounds checking
+                    predator.position = (
+                        max(0, min(self.size[0], predator.position[0] + final_movement[0])),
+                        max(0, min(self.size[1], predator.position[1] + final_movement[1]))
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error updating predator: {str(e)}")
+                    continue
+
+            # Update weather conditions
+            self.current_state.weather_conditions = self._update_weather(
+                self.current_state.weather_conditions
+            )
+
+            return self.current_state
+
+        except Exception as e:
+            logger.error(f"Error in environment step: {str(e)}")
+            return self.current_state
 
     def _update_state(self):
         """Update environment state - resource dynamics, threats, etc."""
@@ -104,54 +166,123 @@ size=size
         # Example: Resource regeneration (simplified)
         for resource in self.current_state.resources:
             if resource.quantity < 100:
-                resource.quantity += random.uniform(0, 0.5)
+                terrain_factor = self._get_terrain_factor(tuple(map(int, resource.position)))
+                weather_factor = self._get_weather_factor(tuple(map(int, resource.position)))
+                resource.quantity += random.uniform(0, 0.5) * terrain_factor * weather_factor
 
         # Example: Threat movement (simplified random walk)
         for i in range(len(self.current_state.predators)):  # Changed from threats
-            predator_pos = self.current_state.predators[i]  # Changed from threats
-            movement = self._calculate_threat_movement(predator_pos.position)  # Changed from threats
-            new_predator_pos = (
-                predator_pos.position[0] + movement[0], predator_pos.position[1] + movement[1])  # Changed from threats
+            predator = self.current_state.predators[i]  # Changed from threats
+            movement = self._calculate_threat_movement(predator.position)  # Changed from threats
+            terrain_gradient = self._calculate_terrain_gradient(tuple(map(int, predator.position)))
+            
+            # Adjust movement based on terrain gradient
+            movement = (movement[0] + terrain_gradient[0], movement[1] + terrain_gradient[1])
+            
+            new_position = (
+                predator.position[0] + movement[0] * predator.speed,
+                predator.position[1] + movement[1] * predator.speed
+            )
+            
             # Keep threats within bounds
-            self.current_state.predators[i].position = (max(0, min(
-                self.size[0]-1, int(new_predator_pos[0]))), max(0, min(self.size[1]-1, int(new_predator_pos[1]))))  # Changed from threats
+            predator.position = (max(0, min(self.size[0]-1, new_position[0])), max(0, min(self.size[1]-1, new_position[1])))
+            self.current_state.predators[i] = predator
 
         # Example: New resource spawning (probability based on complexity)
         if random.random() < 0.01 * self.current_state.complexity_level:
+            position = (random.randint(0, self.size[0]-1), random.randint(0, self.size[1]-1))
+            terrain_factor = self._get_terrain_factor(position)
+            weather_factor = self._get_weather_factor(position)
+            
             self.current_state.resources.append(
                 Resource(
                     type=random.choice(list(ResourceType)),
-                    quantity=random.uniform(10, 50),
-                    position=(random.randint(
-                        0, self.size[0]-1), random.randint(0, self.size[1]-1)),
-                    complexity=random.uniform(0.1, 0.9)
+                    quantity=random.uniform(10, 50) * terrain_factor * weather_factor,
+                    position=position,
+                    complexity=random.uniform(0.1, 0.9),
+                    regeneration_rate = 0.1,
+                    max_quantity = 100,
+                    depletion_threshold = 10,
+                    quality = 0.5,
+                    seasonal_factor = 0.5
                 )
             )
 
-    def _calculate_threat_movement(self, threat_pos: Tuple[float, float]) -> Tuple[float, float]:
-        return (random.uniform(-1, 1), random.uniform(-1, 1))
-
-    def _generate_perlin_noise(self, size: Tuple[int, int], scale: float) -> np.ndarray:
+    def _generate_perlin_noise(self, size: Tuple[int, int]) -> np.ndarray:
         return np.zeros(size)
 
+    def _calculate_threat_movement(self, position: Tuple[float, float]) -> Tuple[float, float]:
+        """Calculate movement vector for a threat based on its current position"""
+        # Get nearest agent
+        nearest_agent = self._find_nearest_agent(position)
+        
+        if nearest_agent:
+            # Move towards agent if found
+            dx = nearest_agent.position[0] - position[0]
+            dy = nearest_agent.position[1] - position[1]
+            # Normalize vector
+            magnitude = (dx**2 + dy**2)**0.5
+            if magnitude > 0:
+                return (dx/magnitude, dy/magnitude)
+                
+        # Random movement if no agent found
+        return (random.uniform(-1, 1), random.uniform(-1, 1))
+
     def _initialize_weather(self) -> Dict:
-        return {}
+        """Initialize weather conditions"""
+        return {
+            "temperature": random.uniform(15, 30),
+            "humidity": random.uniform(0.3, 0.8),
+            "wind_speed": random.uniform(0, 20),
+            "precipitation": random.uniform(0, 1)
+        }
 
     def _update_weather(self, current_weather: Dict) -> Dict:
-        return current_weather
+        """Update weather conditions with slight random changes"""
+        new_weather = current_weather.copy()
+        new_weather["temperature"] += random.uniform(-2, 2)
+        new_weather["humidity"] = max(0, min(1, new_weather["humidity"] + random.uniform(-0.1, 0.1)))
+        new_weather["wind_speed"] = max(0, new_weather["wind_speed"] + random.uniform(-5, 5))
+        new_weather["precipitation"] = max(0, min(1, new_weather["precipitation"] + random.uniform(-0.2, 0.2)))
+        return new_weather
 
     def _get_terrain_factor(self, position: Tuple[int, int]) -> float:
-        return 1.0
+        """Calculate terrain difficulty factor based on position"""
+        x, y = position
+        # Use perlin noise or similar for terrain generation
+        terrain_height = np.sin(x/10) * np.cos(y/10)  # Simple terrain function
+        return max(0.5, min(1.5, 1 + terrain_height))
 
     def _get_weather_factor(self, position: Tuple[int, int]) -> float:
-        return 1.0
+        """Calculate weather impact factor based on position"""
+        if not hasattr(self.current_state, 'weather_conditions'):
+            return 1.0
+        # Consider local weather conditions
+        weather = self.current_state.weather_conditions
+        return 1.0 - (weather.get("precipitation", 0) * 0.3)
 
     def _calculate_terrain_gradient(self, position: Tuple[int, int]) -> Tuple[float, float]:
-
-        return (0.0, 0.0)
+        """Calculate terrain gradient for movement effects"""
+        x, y = position
+        dx = np.cos(x/10) * 0.1
+        dy = np.cos(y/10) * 0.1
+        return (dx, dy)
 
     def _find_nearest_agent(self, pos: Tuple[float, float]) -> Optional['AdaptiveAgent']:
-        return None
+        """Find the nearest agent to a given position"""
+        if not self.current_state.agents:
+            return None
+            
+        nearest = None
+        min_dist = float('inf')
+        
+        for agent in self.current_state.agents:
+            dist = ((pos[0] - agent.position[0])**2 + (pos[1] - agent.position[1])**2)**0.5
+            if dist < min_dist:
+                min_dist = dist
+                nearest = agent
+            
+        return nearest
 
     def add_resources(self, count: int, resource_type: Optional[ResourceType] = None) -> None:
         """Add new resources with complex properties"""
@@ -223,54 +354,16 @@ size=size
                        f"speed={new_predator.speed:.2f}")
 
     def add_predator(self, count: int) -> None:
-        """Add predators to the environment"""
-        for i in range(count):
-            try:
-                genetic_core = GeneticCore()
-                network_params = self._calculate_predator_network(genetic_core)
-                
-                neural_net = NeuralAdaptiveNetwork(
-                    input_size=network_params['input_size'],
-                    hidden_size=network_params['hidden_size'],
-                    output_size=network_params['output_size'],
-                    memory_size=network_params['memory_size'],
-                    learning_rate=genetic_core.brain_genetics.learning_rate,
-                    plasticity=genetic_core.brain_genetics.neural_plasticity
-                )
-                
-                position = (
-                    random.uniform(0, self.size[0]),
-                    random.uniform(0, self.size[1])
-                )
-                
-                predator = AdaptiveAgent(  # Using same base class as agents
-                    genetic_core=genetic_core,
-                    neural_net=neural_net,
-                    position=position,
-                    is_predator=True  # New flag to distinguish predators
-                )
-                
-                # Initialize predator-specific traits
-                predator.hunting_efficiency = genetic_core.physical_genetics.energy_efficiency
-                predator.detection_range = genetic_core.physical_genetics.sensor_sensitivity * 1.5
-                predator.attack_strength = genetic_core.physical_genetics.action_precision
-                
-                self.current_state.predators.append(predator)
-                logger.info(f"Created predator {i+1} with network: {network_params}")
-                
-            except Exception as e:
-                logger.error(f"Failed to create predator {i+1}: {str(e)}")
-    
-    def _calculate_predator_network(self, genetic_core: GeneticCore) -> Dict[str, int]:
-        """Calculate neural network architecture for predators"""
-        # Enhanced sensory inputs for predators
-        sensor_inputs = int(24 * (1 + genetic_core.physical_genetics.sensor_sensitivity))
-        memory_inputs = int(12 * genetic_core.brain_genetics.memory_capacity)
-        
-        # Larger network for complex hunting behaviors
-        return {
-            'input_size': sensor_inputs + memory_inputs,
-            'hidden_size': int(48 * (1 + genetic_core.brain_genetics.neural_plasticity)),
-            'output_size': int(16 * (1 + genetic_core.mind_genetics.creativity)),
-            'memory_size': memory_inputs
-        }
+        add_predator(self, count)
+
+    def get_state(self) -> EnvironmentalState:
+        return self.current_state
+
+    def get_resources(self) -> List[Resource]:
+        return self.current_state.resources
+
+    def get_agents(self) -> List['AdaptiveAgent']:
+        return self.current_state.agents
+
+    def get_size(self) -> Tuple[int, int]:
+        return self.size

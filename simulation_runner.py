@@ -1,25 +1,33 @@
 import logging
 import sys
-import pygame
-import random
-import math
-import pickle
 import os
+import random
+import pickle
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 from collections import defaultdict, deque
-import numpy as np
 import time
+import math
 from agent import AdaptiveAgent
 from genetics import GeneticCore
 from neural_networks import NeuralAdaptiveNetwork
-from adaptive_environment import AdaptiveEnvironment, ResourceType, Resource
+from adaptive_environment import AdaptiveEnvironment
 from visualizer import Visualizer
-import matplotlib.pyplot as plt
-from predator import AdaptivePredator
 from agent_assembly import AgentAssembler
 from birth_registry import BirthRegistry
-from embryo_generator import EmbryoGenerator
+from embryo_generator import EmbryoGenerator, EmbryoToAgentDevelopment
+import json
+from augmentation import NeuralDiagnostics
+from diagnostics import AgentDiagnostics, PopulationDiagnostics
+from predator import Predator
+
+try:
+    import numpy as np
+    import pygame
+    import matplotlib.pyplot as plt
+except ImportError as e:
+    logging.error(f"Failed to import required package: {e}")
+    sys.exit(1)
 
 # Setup logging
 logging.basicConfig(
@@ -88,6 +96,32 @@ class SimulationStats:
         # Create stats directory if it doesn't exist
         if not os.path.exists('simulation_stats'):
             os.makedirs('simulation_stats')
+            
+    def update(self, agents, time_step):
+        """Update simulation statistics"""
+        self.population_history.append(len(agents))
+        total_innovations = sum(len(a.actions) - 5 for a in agents)  # -5 for initial actions
+        self.innovation_history.append(total_innovations)
+        
+    def save_graphs(self):
+        """Save graphs of simulation statistics"""
+        # Population history graph
+        plt.figure(figsize=(10, 5))
+        plt.plot(list(self.population_history))
+        plt.title('Population History')
+        plt.xlabel('Time Step')
+        plt.ylabel('Population Size')
+        plt.savefig('simulation_stats/population_history.png')
+        plt.close()
+        
+        # Innovation history graph
+        plt.figure(figsize=(10, 5))
+        plt.plot(list(self.innovation_history))
+        plt.title('Innovation History')
+        plt.xlabel('Time Step')
+        plt.ylabel('Total Innovations')
+        plt.savefig('simulation_stats/innovation_history.png')
+        plt.close()
 
 class SimulationVisualizer:
     def __init__(self, width: int = 800, height: int = 600, debug_mode: bool = False):
@@ -130,7 +164,10 @@ class SimulationVisualizer:
             'evolution_potential': (0, 255, 255),
             'evolved_action': (255, 165, 0),
             'mutation': (255, 0, 255),
-            'adaptation': (0, 255, 255)
+            'adaptation': (0, 255, 255),
+            'exceptional_agent': (0, 128, 255),
+            'lineage_marker': (255, 255, 255),
+            'action_creation': (255, 200, 0)
         }
         
         # Statistics tracking
@@ -167,7 +204,7 @@ class SimulationVisualizer:
         for threat in env.current_state.threats:
             pygame.draw.circle(
                 self.screen,
-                self.COLORS['threat'],
+                self.COLORS['predator'],
                 (int(threat[0] * CELL_SIZE), 
                  int(threat[1] * CELL_SIZE)),
                 5
@@ -281,9 +318,10 @@ class SimulationVisualizer:
             agent.genetic_core.physical_genetics.energy_efficiency * 0.1
         )
         
-        # Add evolution potential to stats
-        if not hasattr(agent.evolution_stats, 'evolution_potential'):
-            agent.evolution_stats['evolution_potential'] = evolution_potential
+        # Add evolution potential to agent's stats
+        if not hasattr(agent, 'evolution_stats'):
+            agent.evolution_stats = {}
+        agent.evolution_stats['evolution_potential'] = evolution_potential
         
         # Draw evolution potential indicator
         potential_height = 4
@@ -370,7 +408,7 @@ class SimulationVisualizer:
             ]
 
             for stat in agent_stats:
-                text = self.detail_font.render(stat, True, self.COLORS['generation_text'])
+                text = self.detail_font.render(stat, True, self.COLORS['text'])
                 self.screen.blit(text, (WINDOW_SIZE[0] + 10, y_offset))
                 y_offset += 20
                 
@@ -395,7 +433,7 @@ class SimulationVisualizer:
             return
 
         graph_rect = pygame.Rect(WINDOW_SIZE[0] + 10, 400, DETAIL_PANEL_WIDTH - 20, 100)
-        pygame.draw.rect(self.screen, self.COLORS['background'], graph_rect)
+        pygame.draw.rect(self.screen, self.COLORS['stats_background'], graph_rect)
         
         points = []
         max_pop = max(self.stats.population_history)
@@ -419,7 +457,7 @@ class SimulationVisualizer:
             return
 
         graph_rect = pygame.Rect(WINDOW_SIZE[0] + 10, 520, DETAIL_PANEL_WIDTH - 20, 100)
-        pygame.draw.rect(self.screen, self.COLORS['background'], graph_rect)
+        pygame.draw.rect(self.screen, self.COLORS['stats_background'], graph_rect)
         
         points = []
         max_innovations = max(self.stats.innovation_history)
@@ -583,21 +621,19 @@ class PopulationGenetics:
         
         return base_rate * (1 + diversity_factor + population_factor)
 
-def create_predator(env_size: Tuple[int, int]) -> AdaptivePredator:
+def create_predator(env_size: Tuple[int, int]) -> Predator:
     """Create a new predator with its own neural network"""
     genetic_core = GeneticCore()
     
     # Calculate network architecture
     network_params = calculate_network_architecture(genetic_core)
     
-    # Create neural network
+    # Create neural network with correct parameters
     neural_net = NeuralAdaptiveNetwork(
         input_size=network_params['input_size'],
-        hidden_size=network_params['hidden_size'],
+        hidden_size=network_params['memory_size'],  # Use memory_size as hidden_size
         output_size=network_params['output_size'],
-        memory_size=network_params['memory_size'],
-        learning_rate=genetic_core.brain_genetics.learning_rate,
-        plasticity=genetic_core.brain_genetics.neural_plasticity
+        genetic_core=genetic_core  # Pass genetic_core instead of individual params
     )
     
     position = (
@@ -605,138 +641,113 @@ def create_predator(env_size: Tuple[int, int]) -> AdaptivePredator:
         random.randint(0, env_size[1]-1)
     )
     
-    return AdaptivePredator(
+    return Predator(
         genetic_core=genetic_core,
         neural_net=neural_net,
         position=position
     )
 
 def run_simulation():
-    try:
-        # Initialize components
-        logger.info("Starting simulation...")
-        env = AdaptiveEnvironment(size=(80, 60), complexity=0.5)
-        visualizer = SimulationVisualizer()
-        debugger = SimulationDebugger()        
-        population_genetics = PopulationGenetics()
-        
-        # Ensure minimum resources in environment
-        if len(env.current_state.resources) == 0:
-            logger.info("Initializing environment with minimum resources...")
-            env.add_resources(5)
-
-        # Create initial agents
-        agents = []
-        for i in range(5):
-            try:
-                genetic_core = GeneticCore()
-                
-                # Calculate network architecture based on genetics
-                network_params = calculate_network_architecture(genetic_core)
-                
-                # Create neural network with genetic-based architecture
-                neural_net = NeuralAdaptiveNetwork(
-                    input_size=network_params['input_size'],
-                    output_size=network_params['output_size'],
-                    genetic_core=genetic_core  # Pass genetic_core instead of hidden_size
-                )
-                
-                position = (
-                    random.randint(0, env.size[0]-1),
-                    random.randint(0, env.size[1]-1)
-                )
-                
-                agent = AdaptiveAgent(
-                    genetic_core=genetic_core,
-                    neural_net=neural_net,
-                    position=position
-                )
-                agents.append(agent)
-                logger.info(f"Created agent {i+1} with network architecture: {network_params}")
-                
-            except Exception as e:
-                logger.error(f"Failed to create agent {i+1}: {str(e)}")
-                continue
-
-        if not agents:
-            logger.error("Failed to create any agents. Exiting simulation.")
-            return
-
-        running = True
-        paused = False
-        
-        # Main simulation loop
-        while running:
-            try:
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        running = False
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_SPACE:
-                            paused = not paused  # Toggle pause state
-                        elif event.key == pygame.K_ESCAPE:
-                            running = False  # Exit simulation
+    # Initialize components
+    birth_registry = BirthRegistry()
+    agent_assembler = AgentAssembler(AdaptiveAgent, birth_registry)
+    embryo_generator = EmbryoGenerator()
+    development_pipeline = EmbryoToAgentDevelopment(agent_assembler)
+    env = AdaptiveEnvironment((100, 100), complexity=1.0)
+    visualizer = Visualizer()
+    debugger = SimulationDebugger()
+    
+    # Create initial agents
+    agents = []
+    for i in range(5):  # Start with 5 agents
+        try:
+            # Create embryo
+            embryo = embryo_generator.create_embryo(
+                parent=None,
+                position=(random.randint(0, env.size[0]-1), random.randint(0, env.size[1]-1)),
+                environment=env
+            )
             
-                if not paused:
-                    # Update environment
-                    env._update_state()
-                    population_genetics.track_population_genetics(agents)
-                    
-                    # Process each agent
-                    new_agents = []
-                    for agent in agents[:]:  # Create a copy of list for modification
-                        try:
-                            # Update agent
-                            if not agent.update(env.current_state):
-                                logger.info(f"Agent {agent.name} died")
-                                agents.remove(agent)
-                                continue
-                            
-                            # Process agent actions
-                            action, params = agent.decide_action(env.current_state)
-                            result = agent.execute_action(action, params, env.current_state)
-                            
-                            # Check reproduction using agent's internal logic
-                            if agent.can_reproduce():
-                                offspring = agent.reproduce(env.current_state)
-                                if offspring:
-                                    new_agents.append(offspring)
-                                    if hasattr(visualizer, 'add_evolution_event'):
-                                        visualizer.add_evolution_event(
-                                            f"Agent {agent.name[:8]} reproduced (fitness: {agent.calculate_fitness():.2f})",
-                                            'evolution'
-                                        )
-                                
-                        except Exception as e:
-                            logger.error(f"Error processing agent {agent.name}: {str(e)}")
-                            continue
+            # Develop and assemble agent
+            agent = development_pipeline.develop_and_assemble(embryo)
+            if agent:
+                agents.append(agent)
+                env.add_agent(agent)
+                logger.info(f"Created agent {i+1} successfully")
+            else:
+                logger.error(f"Failed to create agent {i+1}")
+        except Exception as e:
+            logger.error(f"Failed to create agent {i+1}: {str(e)}")
+            continue
+    
+    if not agents:
+        logger.error("Failed to create any agents. Exiting simulation.")
+        return
 
-                    # Add new agents
-                    agents.extend(new_agents)
-
-                    # Update visualization
-                    visualizer.draw(env, agents)
+    # Main simulation loop
+    running = True
+    paused = False
+    clock = pygame.time.Clock()
+    
+    while running:
+        try:
+            # Handle events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        paused = not paused
+            
+            if not paused:
+                # Update environment state
+                env.step(agents)
+                
+                # Process each agent
+                new_agents = []
+                for agent in agents[:]:  # Copy list to allow modifications
+                    try:
+                        # Get agent's action decision
+                        action, params = agent.decide_action(env.current_state)
+                        
+                        # Execute action and handle result
+                        action_result = agent.execute_action(action, params, env.current_state)
+                        
+                        # Update agent metrics based on action result
+                        agent.learn_from_experience(env.current_state, action, action_result)
+                        
+                        # Check reproduction
+                        if agent.can_reproduce():
+                            offspring = agent.reproduce(env.current_state)
+                            if offspring:
+                                new_agents.append(offspring)
+                                env.add_agent(offspring)
+                                logger.info(f"Agent {agent.id} reproduced successfully")
                     
-                    # Update simulation monitoring
-                    debugger.monitor_frame(env, agents)
-                    
-                    # Save stats periodically
-                    if debugger.frame_count % 1000 == 0:
-                        visualizer.stats.save_graphs()
+                    except Exception as e:
+                        logger.error(f"Error processing agent {agent.id}: {str(e)}")
+                        continue
+                
+                # Add new agents and remove dead ones
+                agents.extend(new_agents)
+                agents = [agent for agent in agents if agent.is_alive()]
+                
+                # Update visualization
+                visualizer.render(env, agents)
+                
+                # Update simulation monitoring
+                debugger.monitor_frame(env, agents)
+                
+                # Control frame rate
+                clock.tick(60)
         
-            except Exception as e:
-                logger.error(f"Error in simulation loop: {str(e)}")
-                continue
+        except Exception as e:
+            logger.error(f"Error in simulation loop: {str(e)}")
+            continue
 
-        # Cleanup
-        visualizer.stats.save_graphs()
-        pygame.quit()
-        logger.info("Simulation ended normally")
-        
-    except Exception as e:
-        logger.error(f"Fatal simulation error: {str(e)}")
-        pygame.quit()
-        raise
+    # Cleanup
+    pygame.quit()
+    sys.exit()
 
 if __name__ == "__main__":
     try:
@@ -752,7 +763,7 @@ class SimulationManager:
     def __init__(self, config: Optional[Dict] = None):
         """Initialize simulation components"""
         self.config = config or self._default_config()
-        self.agent_assembler = AgentAssembler()
+        self.agent_assembler = AgentAssembler(AdaptiveAgent)
         
         # Initialize core systems
         self.birth_registry = BirthRegistry()
@@ -773,13 +784,47 @@ class SimulationManager:
         self.agents: List[AdaptiveAgent] = []
         self.generation = 0
         
+        # Initialize diagnostics systems
+        self.diagnostics = {
+            'neural': NeuralDiagnostics(),
+            'agent': AgentDiagnostics(),
+            'population': PopulationDiagnostics()
+        }
+        
         # Statistics tracking
+        self.stats_start_time = datetime.now()
         self.stats = {
             'births': 0,
             'deaths': 0,
             'mutations': 0,
-            'adaptations': 0
+            'innovations': 0,
+            'total_fitness': 0.0,
+            'history': {
+                'population': deque(maxlen=1000),
+                'fitness': deque(maxlen=1000),
+                'innovations': deque(maxlen=1000),
+                'mutations': deque(maxlen=1000)
+            }
         }
+        
+        # Initialize performance tracking
+        self.performance_metrics = {
+            'fps': deque(maxlen=60),
+            'update_time': deque(maxlen=60),
+            'render_time': deque(maxlen=60)
+        }
+        
+        # Initialize checkpoint system
+        self.last_checkpoint_time = time.time()
+        self.checkpoint_interval = 300  # 5 minutes
+        
+        # Create necessary directories
+        for dir_name in ['simulation_stats', 'checkpoints', 'screenshots']:
+            os.makedirs(dir_name, exist_ok=True)
+        
+        # Initialize simulation clock
+        self.clock = pygame.time.Clock()
+        self.frame_count = 0
 
     def initialize_population(self):
         """Create initial population"""
@@ -789,60 +834,131 @@ class SimulationManager:
             logger.info(f"Created agent: {agent.id}")
 
     def _create_agent(self, parent: Optional[AdaptiveAgent] = None) -> AdaptiveAgent:
-        """Create a new agent using the assembler"""
+        """Create a new agent using the assembler with proper growth rate handling"""
         position = (
             random.randint(0, self.environment.size[0]),
             random.randint(0, self.environment.size[1])
         )
         
-        assembled = self.agent_assembler.create_agent(position, parent)
-        logger.info(f"Created agent with stats: {assembled.stats}")
-        return assembled.agent
+        # Get growth rate from parent or generate new one
+        growth_rate = (
+            parent.genetic_core.mind_genetics.cognitive_growth_rate * 1.1 
+            if parent 
+            else random.uniform(0.8, 1.2)
+        )
+        
+        # Create embryo with growth rate
+        embryo = self.embryo_generator.create_embryo(
+            parent=parent,
+            position=position,
+            growth_rate=growth_rate,
+            environment=self.environment
+        )
+        
+        # Assemble agent with embryo data
+        assembled = self.agent_assembler.assemble(
+            position=position,
+            parent=parent,
+            gender=embryo.gender,
+            environment=self.environment,
+            growth_rate=growth_rate  # Pass growth rate to assembler
+        )
+
+        if assembled.success:
+            # Initialize growth metrics
+            assembled.agent.growth_metrics.cognitive_growth_rate = growth_rate
+            assembled.agent.growth_metrics.adaptation_rate = (
+                growth_rate * assembled.agent.genetic_core.mind_genetics.adaptation_rate
+            )
+            
+            logger.info(f"Created agent with growth rate: {growth_rate}")
+            return assembled.agent
+        else:
+            logger.error(f"Failed to assemble agent: {assembled.error_message}")
+            return None
 
     def run_simulation(self):
         """Main simulation loop"""
         running = True
-        clock = pygame.time.Clock()
+        paused = False
+        last_save_time = time.time()
+        save_interval = 300  # Save every 5 minutes
         
         while running:
+            # Maintain target frame rate
+            self.clock.tick(self.config['fps'])
+            current_time = time.time()
+            
             # Process events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        paused = not paused
+                    elif event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_s:
+                        self._save_simulation_data()
             
-            # Update environment
-            self.environment.update()
-            
-            # Update each agent
-            for agent in self.agents[:]:  # Copy list to allow modifications
-                # Update agent systems
-                agent.update(self.environment.get_state())
+            if not paused:
+                # Update environment with proper error handling
+                try:
+                    self.environment.step(self.agents)
+                except Exception as e:
+                    logger.error(f"Environment update failed: {str(e)}")
                 
-                # Process rest cycles
-                if agent.needs_rest():
-                    agent.process_rest_cycle()
+                # Update agents with proper error handling
+                new_agents = []
+                for agent in self.agents[:]:  # Copy list to allow modifications
+                    try:
+                        # Update agent systems
+                        if not agent.is_alive():
+                            self._handle_death(agent)
+                            continue
+                        
+                        # Update agent state
+                        agent.update(self.environment.get_state())
+                        
+                        # Process rest cycles
+                        if agent.needs_rest():
+                            agent.process_rest_cycle()
+                        
+                        # Handle reproduction
+                        if agent.can_reproduce():
+                            offspring = self._handle_reproduction(agent)
+                            if offspring:
+                                new_agents.append(offspring)
+                    
+                    except Exception as e:
+                        logger.error(f"Agent update failed for {agent.id}: {str(e)}")
+                        continue
                 
-                # Handle reproduction
-                if agent.can_reproduce():
-                    self._handle_reproduction(agent)
+                # Add new agents
+                self.agents.extend(new_agents)
                 
-                # Handle death
-                if not agent.is_alive():
-                    self._handle_death(agent)
+                # Update diagnostics
+                self._update_diagnostics()
+                
+                # Periodic saving
+                if current_time - last_save_time > save_interval:
+                    self._save_simulation_data()
+                    last_save_time = current_time
             
-            # Update diagnostics
-            self._update_diagnostics()
+            # Update visualization regardless of pause state
+            try:
+                self.visualizer.draw(
+                    self.environment,
+                    self.agents,
+                    self.diagnostics
+                )
+            except Exception as e:
+                logger.error(f"Visualization update failed: {str(e)}")
             
-            # Update visualization
-            self.visualizer.draw(
-                self.environment,
-                self.agents,
-                self.diagnostics
-            )
-            
-            # Maintain frame rate
-            clock.tick(self.config['fps'])
+            # Update frame counter
+            self.frame_count += 1
         
+        # Cleanup when simulation ends
         self._cleanup()
 
     def _handle_reproduction(self, parent: AdaptiveAgent):
@@ -866,9 +982,43 @@ class SimulationManager:
         self.diagnostics['population'].update(self.agents)
 
     def _cleanup(self):
-        """Cleanup resources"""
-        pygame.quit()
-        self._save_simulation_data()
+        """Cleanup resources and save final state"""
+        try:
+            # Save final simulation state
+            self._save_simulation_data()
+            
+            # Close diagnostic systems
+            for diagnostic in self.diagnostics.values():
+                if hasattr(diagnostic, 'close'):
+                    diagnostic.close()
+            
+            # Save final statistics
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            stats_file = f"simulation_stats/final_stats_{timestamp}.json"
+            os.makedirs("simulation_stats", exist_ok=True)
+            
+            final_stats = {
+                'duration': str(datetime.now() - self.stats_start_time),
+                'total_frames': self.frame_count,
+                'final_population': len(self.agents),
+                'total_births': self.stats['births'],
+                'total_deaths': self.stats['deaths'],
+                'total_mutations': self.stats['mutations'],
+                'total_innovations': self.stats['innovations'],
+                'average_fitness': self.stats['total_fitness'] / max(1, len(self.agents))
+            }
+            
+            with open(stats_file, 'w') as f:
+                json.dump(final_stats, f, indent=2)
+                
+            # Cleanup pygame
+            pygame.quit()
+            
+            logger.info("Simulation cleanup completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}")
+            pygame.quit()  # Ensure pygame quits even if cleanup fails
 
     def _save_simulation_data(self):
         """Save simulation results"""
@@ -974,3 +1124,55 @@ class SimulationManager:
         except Exception as e:
             logger.error(f"Failed to initialize display: {e}")
             return False
+
+    def create_new_agent(self, parent=None):
+        # Create embryo
+        embryo = self.embryo_generator.create_embryo(
+            parent=parent,
+            position=self._get_random_position(),
+            environment=self.environment
+        )
+        
+        # Develop and assemble agent
+        development_pipeline = EmbryoToAgentDevelopment(self.agent_assembler)
+        agent = development_pipeline.develop_and_assemble(embryo)
+        
+        if agent:
+            self.agents.append(agent)
+            self.logger.info(f"New agent created and added to simulation: {agent.id}")
+        else:
+            self.logger.error("Failed to create new agent")
+
+    def create_agent_direct(self, parent=None, position=None) -> Optional[AdaptiveAgent]:
+        """Create a new agent directly without embryo stage"""
+        try:
+            if position is None:
+                position = self._get_random_position()
+
+            assembled = self.agent_assembler.assemble_direct(
+                parent=parent,
+                position=position,
+                environment=self.environment
+            )
+            
+            if assembled.success and assembled.agent:
+                self.agents.append(assembled.agent)
+                self.logger.info(f"New agent created directly: {assembled.agent.id}")
+                return assembled.agent
+            else:
+                self.logger.error(f"Failed to create agent directly: {assembled.error_message}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error creating agent directly: {str(e)}")
+            return None
+
+    def create_initial_population_direct(self, size: int) -> None:
+        """Create initial population directly without embryos"""
+        successful = 0
+        for i in range(size):
+            agent = self.create_agent_direct()
+            if agent:
+                successful += 1
+                
+        self.logger.info(f"Created {successful}/{size} initial agents directly")

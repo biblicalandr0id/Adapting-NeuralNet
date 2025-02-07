@@ -28,9 +28,9 @@ class EmbryoNamer:
 
     def generate_random_name(self):
         """Generate a random name for an embryo"""
-        prefiranom.choice(self.prefixes)
-        suffix =dom.choice(self.suffixes)
-        idener =dom.ce(self.unique_identifiers)
+        prefix = random.choice(self.prefixes)
+        suffix = random.choice(self.suffixes)
+        identifier = random.choice(self.unique_identifiers)
         sequence = random.randint(100, 999)
 
         return f"{prefix}-{suffix}-{identifier}{sequence}"

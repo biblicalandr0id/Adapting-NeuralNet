@@ -163,66 +163,152 @@ class AgentEmbryo:
 
 
 class EmbronicMind:
-    def __init__(self):
-        self.metrics = MindMetrics()
-        self.state = MindState(metrics=self.metrics)
+    """Represents the early stage developing mind of an agent"""
+    def __init__(self, growth_rate: float = 0.01):
+        self.embryo = create_embryo(growth_rate=growth_rate)
+        self.state = None
+        self.development_stage = 0
         
-    def process_stimulus(self, stimulus: Dict[str, Any]) -> Tuple[Dict[str, Any], MindState]:
-        """Process incoming stimulus and return response with updated state"""
-        try:
-            # Update metrics based on stimulus
-            self.metrics.age += 0.1
-            self.metrics.cognitive_complexity += 0.01
-            
-            # Generate response
-            response = {
-                "complexity": self.metrics.cognitive_complexity,
-                "adaptation": self.metrics.adaptation_rate,
-                "learning": self.metrics.learning_capacity,
-                "focus": stimulus.get("type", "unknown")
-            }
-            
-            return response, self.state
-            
-        except Exception as e:
-            logging.error(f"Error processing stimulus: {e}")
-            return {}, self.state
+    def process_input(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process input through embryonic mind"""
+        return self.embryo.process_stimulus(input_data)[0]
+
+    def develop(self) -> None:
+        """Develop embryonic mind"""
+        self.embryo.grow()
+        self.development_stage = self.embryo.metrics.growth_stage
 
 
 class Mind:
-    def __init__(self, genetic_core: GeneticCore, neural_net: NeuralAdaptiveNetwork):
+    def __init__(self, genetic_core: GeneticCore, neural_net: NeuralAdaptiveNetwork,
+                 memory_system, growth_rate: float):
         self.genetic_core = genetic_core
         self.neural_net = neural_net
-        self.state = MindState()
-        self.memory = []
-        self.processing_queue = []
+        self.memory_system = memory_system
+        self.growth_rate = growth_rate
         
-    def process_state(self, state_input: Dict) -> Dict:
-        """Process current state through mind systems"""
-        # Convert input to tensor
-        state_tensor = torch.tensor([float(v) for v in state_input.values()])
+        # Create embryonic template with just growth rate
+        self.embryo = create_embryo(growth_rate=growth_rate)
         
-        # Process through neural network
-        output, importance = self.neural_net(state_tensor)
+        # Initialize cognitive metrics with genetic influence
+        self.cognitive_metrics = {
+            'creativity': genetic_core.mind_genetics.creativity,
+            'learning_efficiency': genetic_core.mind_genetics.learning_efficiency,
+            'pattern_recognition': genetic_core.brain_genetics.pattern_recognition,
+            'problem_solving': genetic_core.mind_genetics.problem_solving,
+            'adaptability': genetic_core.mind_genetics.adaptation_rate
+        }
         
-        # Update mind state
-        self.state.energy_consumption = importance.mean().item()
-        self.state.consciousness_level = max(0.1, min(1.0, 
-            self.state.consciousness_level - self.state.energy_consumption * 0.1
-        ))
+        # Set up development stages based on genetics
+        self.development_stages = {
+            'embryonic': 0.0,
+            'basic_cognition': 0.2 * self.growth_rate,
+            'pattern_recognition': 0.4 * self.growth_rate,
+            'abstract_thinking': 0.6 * self.growth_rate,
+            'creative_reasoning': 0.8 * self.growth_rate,
+            'self_awareness': 1.0 * self.growth_rate
+        }
+        
+        self.current_stage = 'embryonic'
+        self.development_progress = 0.0
+        
+    def process_thought(self, input_data: torch.Tensor) -> torch.Tensor:
+        """Process thought with genetic trait influence"""
+        # Get current stage modifiers
+        stage_modifiers = self._get_stage_modifiers()
+        
+        # Apply genetic creativity to thought process
+        if self.cognitive_metrics['creativity'] > 1.0:
+            creative_noise = torch.randn_like(input_data) * (self.cognitive_metrics['creativity'] - 1.0) * 0.1
+            input_data = input_data + creative_noise
+            
+        # Process through neural network with stage influence
+        output, importance = self.neural_net(
+            input_data, 
+            context=self._get_cognitive_context()
+        )
+        
+        # Apply stage-based modifications
+        output = output * stage_modifiers['processing']
+        
+        # Update development progress
+        self._update_development(importance.mean().item())
+        
+        return output
+        
+    def _get_stage_modifiers(self) -> Dict[str, float]:
+        """Get modifiers based on development stage"""
+        stage_progress = self.development_stages[self.current_stage]
         
         return {
-            'output': output.detach().numpy(),
-            'consciousness': self.state.consciousness_level,
-            'energy': self.state.energy_consumption
+            'processing': 1.0 + (stage_progress * 0.2),
+            'learning': 1.0 + (stage_progress * 0.3),
+            'creativity': 1.0 + (stage_progress * 0.1)
         }
+        
+    def _get_cognitive_context(self) -> torch.Tensor:
+        """Get cognitive context based on current stage and metrics"""
+        context = torch.tensor([
+            self.cognitive_metrics['creativity'],
+            self.cognitive_metrics['pattern_recognition'],
+            self.cognitive_metrics['problem_solving'],
+            self.development_progress
+        ])
+        
+        return context.unsqueeze(0)  # Add batch dimension
+        
+    def _update_development(self, importance: float):
+        """Update development progress based on thought importance"""
+        # Scale importance by learning efficiency
+        effective_importance = importance * self.cognitive_metrics['learning_efficiency']
+        
+        # Update progress
+        self.development_progress += effective_importance * self.growth_rate
+        
+        # Check for stage transitions
+        for stage, threshold in self.development_stages.items():
+            if self.development_progress >= threshold and stage != self.current_stage:
+                self.current_stage = stage
+                # Adapt neural network for new stage
+                self.neural_net.adapt_network()
+                break
+                
+    def dream_process(self):
+        """Process experiences during dream state with genetic influence"""
+        if not self.memory_system:
+            return
+            
+        # Get recent experiences
+        recent_memories = self.memory_system.get_recent_memories()
+        
+        # Scale dream creativity by genetics
+        dream_creativity = self.cognitive_metrics['creativity'] * 1.5
+        
+        for memory in recent_memories:
+            # Apply creative processing in dreams
+            if self.cognitive_metrics['creativity'] > 1.0:
+                memory = self._apply_creative_variation(memory)
+            
+            # Process through neural network
+            self.neural_net.process_dream({
+                'state': memory.state,
+                'action': memory.action,
+                'reward': memory.reward * dream_creativity
+            })
+            
+    def _apply_creative_variation(self, memory: Dict) -> Dict:
+        """Apply creative variations to memory during dreams"""
+        if 'state' in memory and isinstance(memory['state'], torch.Tensor):
+            creativity = self.cognitive_metrics['creativity']
+            noise_scale = (creativity - 1.0) * 0.1
+            memory['state'] = memory['state'] + torch.randn_like(memory['state']) * noise_scale
+        return memory
 
 
-def create_embryo() -> AgentEmbryo:
+def create_embryo(growth_rate: float = 0.01) -> AgentEmbryo:
     """Factory function to create a new agent embryo"""
-    return AgentEmbryo()
-
-
-def create_embryo() -> EmbronicMind:
+    embryo = AgentEmbryo()
+    embryo.growth_rate = growth_rate
+    return embryo
     """Factory function to create embryonic mind"""
     return EmbronicMind()

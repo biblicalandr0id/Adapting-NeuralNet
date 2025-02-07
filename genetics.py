@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, TYPE_CHECKING
 from enum import Enum
 import math
 import json
@@ -11,6 +11,9 @@ from genetic_inheritance import DigitalNucleotide, GeneticTrait
 import uuid
 import datetime
 import os
+
+if TYPE_CHECKING:
+    from embryo_generator import Embryo
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -29,13 +32,16 @@ class BaseTraits:
 @dataclass
 class MindGenetics:
     # Basic mental attributes
-    creativity: float = 1.0  # Added
+    creativity: float = 1.0
     learning_efficiency: float = 1.0
     adaptation_rate: float = 1.0
     memory_retention: float = 1.0
     memory_capacity: float = 1.0
     problem_solving: float = 1.0
     strategic_thinking: float = 0.6
+    cognitive_growth_rate: float = 1.0  # Added with a default value
+    pattern_recognition: float = 1.0  # Added for mind processing
+    development_plasticity: float = 0.6  # Added for development
 
     # Advanced mental traits
     risk_assessment: float = 0.5
@@ -193,6 +199,7 @@ class PhysicalGenetics:
     metabolic_rate: float = 1.0
     longevity_factor: float = 1.0
     adaptation_speed: float = 0.5
+    action_precision: float = 1.0
 
     def calculate_metabolism(self) -> float:
         """Calculate metabolism rate with efficiency bonus"""
@@ -227,7 +234,9 @@ class EmbryoGenetics:
     mutation_chance: float = 0.05
     inheritance_factor: float = 0.7
     trait_stability: float = 0.8
-    development_plasticity: float = 0.6
+    neural_plasticity: float = 0.6
+    cognitive_growth_rate: float = 1.0
+    development_plasticity: float = 0.6  # Added missing trait
     
     def calculate_mutation_rate(self) -> float:
         return self.mutation_chance * (1 - self.trait_stability)
@@ -236,7 +245,7 @@ class EmbryoGenetics:
         return self.inheritance_factor * self.trait_stability
         
     def calculate_development_speed(self) -> float:
-        return self.development_rate * self.development_plasticity
+        return self.development_rate * self.neural_plasticity
         
     def calculate_trait_stability(self) -> float:
         return self.trait_stability * (1 + self.inheritance_factor * 0.2)
@@ -264,11 +273,18 @@ class GeneticCore:
         self.mind_genetics = MindGenetics()
         self.physical_genetics = PhysicalGenetics()
         self.embryo_genetics = EmbryoGenetics(
-            growth_rate=random.uniform(0.8, 1.2),
-            differentiation_rate=random.uniform(0.8, 1.2),
-            plasticity=random.uniform(0.8, 1.2),
-            stability=random.uniform(0.8, 1.2)
+            development_rate=random.uniform(0.8, 1.2),
+            mutation_chance=random.uniform(0.01, 0.1),
+            inheritance_factor=random.uniform(0.5, 0.9),
+            trait_stability=random.uniform(0.7, 0.9),
+            neural_plasticity=random.uniform(0.4, 0.8),
+            cognitive_growth_rate=random.uniform(0.8, 1.5),
+            development_plasticity=random.uniform(0.4, 0.8)
         )
+        
+        # Initialize development and mutation variables
+        self.development_progress = 0.0
+        self.mutation_rate = 0.05  # Base mutation rate
         
         # Validate initialization
         self._validate_genetics()
@@ -375,6 +391,12 @@ class GeneticCore:
             curiosity_factor=self.base_traits.complexity *
             np.random.normal(1.0, 0.1),
             strategic_thinking=self.base_traits.stability *
+            np.random.normal(1.0, 0.1),
+            cognitive_growth_rate=self.base_traits.adaptability *
+            np.random.normal(1.0, 0.1),
+            pattern_recognition=self.base_traits.complexity *
+            np.random.normal(1.0, 0.1),
+            development_plasticity=self.base_traits.adaptability *
             np.random.normal(1.0, 0.1)
         )
 
@@ -433,6 +455,8 @@ class GeneticCore:
             longevity_factor=self.base_traits.complexity *
             np.random.normal(1.0, 0.1),
             adaptation_speed=self.base_traits.stability *
+            np.random.normal(1.0, 0.1),
+            action_precision=self.base_traits.efficiency *
             np.random.normal(1.0, 0.1)
         )
 
@@ -793,7 +817,7 @@ class GeneticCore:
         
         return (physical_score * 0.3 + brain_score * 0.3 + mind_score * 0.4)
 
-    def get_all_traits(self) -> List[Tuple[str, float]]:
+    def get_all_traits_list(self) -> List[Tuple[str, float]]:
         """Get all genetic traits as a list of (name, value) tuples"""
         traits = []
         for genetics_class in [self.physical_genetics, self.brain_genetics, self.mind_genetics]:
@@ -851,6 +875,17 @@ class GeneticCore:
         }
         return sum(potentials.values()) / len(potentials)
 
+    def _develop_genetic_core(self, embryo: 'Embryo') -> 'GeneticCore':
+        """Develop genetic core from embryo genetics"""
+        genetic_core = GeneticCore()
+        
+        # Transfer embryo genetics to core systems
+        genetic_core.mind_genetics.cognitive_growth_rate = embryo.genetics.cognitive_growth_rate
+        genetic_core.brain_genetics.neural_plasticity = embryo.genetics.neural_plasticity
+        genetic_core.mind_genetics.memory_capacity = embryo.genetics.memory_capacity
+        genetic_core.mind_genetics.adaptation_rate = embryo.genetics.adaptation_rate
+        
+        return genetic_core
 
 def create_offspring(parent1: 'GeneticCore', parent2: 'GeneticCore') -> 'GeneticCore':
     """Convenience function to create offspring from two parents"""

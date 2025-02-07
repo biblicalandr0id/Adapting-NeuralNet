@@ -25,6 +25,8 @@ from utils.logger_config import setup_logging
 from predator import AdaptivePredator
 from birth_records import BirthRegistry
 from simulation_runner import SimulationManager
+from agent_assembly import AgentAssembler
+from embryo_generator import EmbryoToAgentDevelopment
 
 def calculate_network_architecture(genetic_core: GeneticCore) -> Dict[str, int]:
     """Calculate neural network architecture based on genetic traits"""
@@ -83,6 +85,34 @@ def main():
     except Exception as e:
         logger.critical(f"Application crashed: {e}", exc_info=True)
         sys.exit(1)
+
+    # 1. First create an embryo generator
+    embryo_generator = EmbryoGenerator()
+
+    # 2. Create an agent assembler
+    agent_assembler = AgentAssembler(
+        agent_class=AdaptiveAgent,
+        birth_registry=BirthRegistry()
+    )
+
+    # 3. Create the development pipeline
+    development = EmbryoToAgentDevelopment(agent_assembler)
+
+    # 4. Create and develop an embryo into an agent
+    embryo = embryo_generator.create_embryo(
+        parent=None,  # First generation
+        position=(0, 0),
+        environment={}  # Your environment settings
+    )
+
+    # 5. Develop embryo into agent
+    agent = development.develop_and_assemble(embryo)
+
+    # 6. Verify success
+    if agent:
+        print(f"Agent created successfully!")
+        print(f"Agent ID: {agent.id}")
+        print(f"Genetic traits: {agent.genetic_core.get_all_traits()}")
 
 if __name__ == "__main__":
     main()

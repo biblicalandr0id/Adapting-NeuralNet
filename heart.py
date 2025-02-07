@@ -1,9 +1,10 @@
 # heart.py
+import datetime
 import hashlib
 import os
 import time
 import numpy as np
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Tuple
 from dataclasses import dataclass, field
 import threading
 import logging
@@ -67,7 +68,7 @@ class HeartSecurity:
             else:
                 logging.error(f"Component {name} not found at {path}")
                 if self.is_alive:
-                  self.self_destruct()
+                    self.self_destruct()
                 return
                 
     def calculate_checksum(self, file_path: str) -> str:
@@ -177,13 +178,13 @@ class HeartSecurity:
                 self.self_destruct()
                 break
     def _clean_interaction_history_loop(self):
-      """Continuously clean old interactions"""
-      while self.is_alive:
-        try:
-          self._clean_old_interactions()
-          time.sleep(10) #Clean every 10 seconds
-        except Exception as e:
-          logging.error(f"Error cleaning old interactions: {e}")
+        """Continuously clean old interactions"""
+        while self.is_alive:
+            try:
+                self._clean_old_interactions()
+                time.sleep(10) #Clean every 10 seconds
+            except Exception as e:
+                logging.error(f"Error cleaning old interactions: {e}")
           
     def _clean_old_interactions(self, max_age: float = 3600):
         """Remove old interactions from history"""
@@ -223,6 +224,7 @@ def create_heart_security(component_paths: Dict[str, str]) -> HeartSecurity:
 class HeartSystem:
     """Manages the heart functions and emotional state of an agent"""
     def __init__(self, genetics):
+       
         self.genetics = genetics
         self.state = HeartState()
         self.memory = []  # Stores recent heart events
@@ -280,7 +282,7 @@ class HeartSystem:
         self.trust_memory.append({
             'type': interaction_type,
             'outcome': outcome,
-            'timestamp': datetime.now()
+            'timestamp': datetime.datetime.now()
         })
         
         # Trim old memories
